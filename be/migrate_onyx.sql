@@ -1,0 +1,126 @@
+USE kostku;
+
+CREATE TABLE IF NOT EXISTS resident_applications (
+  id VARCHAR(40) PRIMARY KEY,
+  name VARCHAR(150) NOT NULL,
+  phone VARCHAR(30) NOT NULL,
+  email VARCHAR(120) NULL,
+  nik VARCHAR(32) NULL,
+  address TEXT NULL,
+  occupation VARCHAR(150) NULL,
+  room VARCHAR(150) NOT NULL,
+  lease_type VARCHAR(30) NOT NULL,
+  duration INT NOT NULL DEFAULT 1,
+  start_date DATE NULL,
+  end_date DATE NULL,
+  monthly_budget DECIMAL(12,2) NOT NULL DEFAULT 0,
+  deposit DECIMAL(12,2) NOT NULL DEFAULT 0,
+  emergency_contact VARCHAR(150) NULL,
+  refund_bank VARCHAR(80) NULL,
+  refund_account VARCHAR(80) NULL,
+  refund_account_name VARCHAR(150) NULL,
+  notes TEXT NULL,
+  password_hash VARCHAR(255) NULL,
+  application_status VARCHAR(60) NOT NULL DEFAULT 'Menunggu Review',
+  administration_status VARCHAR(80) NOT NULL DEFAULT 'Belum Dibayar',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS payment_proofs (
+  id VARCHAR(40) PRIMARY KEY,
+  application_id VARCHAR(40) NOT NULL,
+  invoice VARCHAR(60) NULL,
+  resident_name VARCHAR(150) NULL,
+  room VARCHAR(150) NULL,
+  sender_bank VARCHAR(80) NULL,
+  sender_name VARCHAR(150) NULL,
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  file_name VARCHAR(255) NULL,
+  file_path VARCHAR(255) NULL,
+  file_url VARCHAR(255) NULL,
+  mime_type VARCHAR(100) NULL,
+  file_size INT NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'uploaded',
+  reviewed_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS utility_meters (
+  id VARCHAR(80) PRIMARY KEY,
+  application_id VARCHAR(40) NULL,
+  resident_name VARCHAR(150) NULL,
+  room VARCHAR(150) NOT NULL,
+  meter_month VARCHAR(7) NOT NULL,
+  electric_kwh DECIMAL(10,2) NOT NULL DEFAULT 0,
+  water_m3 DECIMAL(10,2) NOT NULL DEFAULT 0,
+  electric_rate DECIMAL(10,2) NOT NULL DEFAULT 0,
+  water_rate DECIMAL(10,2) NOT NULL DEFAULT 0,
+  fixed_fee DECIMAL(12,2) NOT NULL DEFAULT 0,
+  electric_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  water_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  status VARCHAR(40) NOT NULL DEFAULT 'Pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS payment_invoices (
+  id VARCHAR(60) PRIMARY KEY,
+  application_id VARCHAR(40) NULL,
+  provider VARCHAR(40) NOT NULL DEFAULT 'bayar_gg',
+  provider_invoice_id VARCHAR(120) NULL,
+  payment_url TEXT NULL,
+  description VARCHAR(255) NULL,
+  amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+  method VARCHAR(60) NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'created',
+  raw_response LONGTEXT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS service_tickets (
+  id VARCHAR(40) PRIMARY KEY,
+  application_id VARCHAR(40) NOT NULL,
+  category VARCHAR(60) NOT NULL,
+  priority VARCHAR(30) NOT NULL DEFAULT 'Normal',
+  issue TEXT NOT NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'open',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS access_states (
+  application_id VARCHAR(40) PRIMARY KEY,
+  locked TINYINT(1) NOT NULL DEFAULT 1,
+  guest_pass VARCHAR(60) NOT NULL,
+  valid_until VARCHAR(20) NOT NULL DEFAULT '22:00',
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS access_logs (
+  id VARCHAR(40) PRIMARY KEY,
+  application_id VARCHAR(40) NOT NULL,
+  action VARCHAR(150) NOT NULL,
+  detail VARCHAR(255) NULL,
+  status VARCHAR(40) NOT NULL DEFAULT 'logged',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS iot_room_telemetry (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  room_code VARCHAR(20) NOT NULL,
+  temperature DECIMAL(6,2) NOT NULL DEFAULT 0,
+  humidity DECIMAL(6,2) NOT NULL DEFAULT 0,
+  power_watt DECIMAL(10,2) NOT NULL DEFAULT 0,
+  energy_kwh DECIMAL(10,3) NOT NULL DEFAULT 0,
+  water_m3 DECIMAL(10,3) NOT NULL DEFAULT 0,
+  ac_on TINYINT(1) NOT NULL DEFAULT 0,
+  light_on TINYINT(1) NOT NULL DEFAULT 0,
+  water_on TINYINT(1) NOT NULL DEFAULT 0,
+  raw_payload JSON NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_iot_room_created (room_code, created_at)
+);

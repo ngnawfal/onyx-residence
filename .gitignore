@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment / secrets (credentials di config sudah default dev, aman)
+.env
+.env.local
+.env.*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Uploads / user-generated content
+be/storage/uploads/*
+!be/storage/uploads/.gitkeep
+
+# JSON store data (runtime state, bukan source)
+be/storage/applications.json
+be/storage/payment-proofs.json
+be/storage/utility-meters.json
+
+# Temp files
+tmp_*
+*.tmp
+*.log
+
+# Vite cache
+.vite/
+
+# Package manager lock (keep package-lock.json though)
+# yarn.lock
+# pnpm-lock.yaml

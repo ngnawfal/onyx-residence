@@ -8,10 +8,13 @@ require __DIR__ . '/../config/cors.php';
 require __DIR__ . '/../lib/Database.php';
 require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
+require __DIR__ . '/../lib/Auth.php';
 
 try {
     // Membaca metode HTTP request.
     $method = Request::method();
+    Auth::requireAdmin();
+    if ($method !== 'GET') Auth::requireCsrf();
 
     // Membuat koneksi PDO.
     $db = Database::connection();

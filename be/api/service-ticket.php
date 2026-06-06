@@ -9,6 +9,7 @@ require __DIR__ . '/../config/cors.php';
 require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
 require __DIR__ . '/../lib/Database.php';
+require __DIR__ . '/../lib/Auth.php';
 
 // Membuka koneksi database dan membaca HTTP method.
 $db = Database::connection();
@@ -19,9 +20,11 @@ if ($method === 'GET') {
     $appId = trim((string) ($_GET['application_id'] ?? ''));
     // Jika application_id ada, ambil tiket milik resident tersebut.
     if ($appId !== '') {
+        Auth::requireApplicationAccess($appId);
         $stmt = $db->prepare('SELECT * FROM service_tickets WHERE application_id = :id ORDER BY created_at DESC');
         $stmt->execute(['id' => $appId]);
     } else {
+        Auth::requireAdmin();
         // Jika tidak ada filter, admin melihat semua tiket service.
         $stmt = $db->query('SELECT * FROM service_tickets ORDER BY created_at DESC');
     }
@@ -33,16 +36,27 @@ if ($method !== 'POST' && $method !== 'PATCH') Response::error('Method tidak dii
 
 // Membaca body JSON dan membuat ID tiket jika belum dikirim frontend.
 $input = Request::input();
+$applicationId = trim((string) ($input['application_id'] ?? ''));
+$category = trim((string) ($input['category'] ?? ''));
+$issue = trim((string) ($input['issue'] ?? ''));
+
+if ($applicationId === '' || $category === '' || $issue === '') {
+    Response::error('application_id, category, dan issue wajib diisi', 422);
+}
+
+Auth::requireApplicationAccess($applicationId);
+Auth::requireCsrf();
+
 $id = (string) ($input['id'] ?? ('TKT-' . date('YmdHis') . '-' . random_int(100, 999)));
 
 // Upsert tiket agar submit ulang dengan ID sama tidak membuat duplikasi.
 $stmt = $db->prepare('INSERT INTO service_tickets (id, application_id, category, priority, issue, status) VALUES (:id,:application_id,:category,:priority,:issue,:status) ON DUPLICATE KEY UPDATE category=VALUES(category), priority=VALUES(priority), issue=VALUES(issue), status=VALUES(status)');
 $stmt->execute([
     'id' => $id,
-    'application_id' => (string) ($input['application_id'] ?? ''),
-    'category' => (string) ($input['category'] ?? 'Service'),
+    'application_id' => $applicationId,
+    'category' => $category,
     'priority' => (string) ($input['priority'] ?? 'Normal'),
-    'issue' => (string) ($input['issue'] ?? ''),
+    'issue' => $issue,
     'status' => (string) ($input['status'] ?? 'open'),
 ]);
 

@@ -7,34 +7,31 @@ declare(strict_types=1);
 require __DIR__ . '/../config/cors.php';
 require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
-
-// Membuat cookie admin dari backend supaya session tidak perlu dibuat lewat JavaScript.
-function issueAdminAuthCookie(): void
-{
-    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
-    setcookie('kostku-auth', 'true', [
-        'expires' => time() + 86400,
-        'path' => '/',
-        'secure' => $isHttps,
-        'httponly' => true,
-        'samesite' => 'Strict',
-    ]);
-}
+require __DIR__ . '/../lib/Auth.php';
+require __DIR__ . '/../lib/RateLimit.php';
 
 // Login admin hanya menerima POST agar username/password dikirim di body request.
 if (Request::method() !== 'POST') Response::error('Method tidak diizinkan', 405);
+RateLimit::check('admin-auth', 8, 600);
 
 // Membaca credential dari frontend; untuk project UAS credential demo tetap sederhana.
 $input = Request::input();
 $username = trim((string) ($input['username'] ?? ''));
 $password = (string) ($input['password'] ?? '');
 
-// Credential demo dipindah ke backend agar frontend tidak lagi membuat cookie admin sendiri.
-if ($username !== 'admin' || $password !== 'admin123') {
+$production = Auth::env('ONYX_PRODUCTION') === 'true';
+$adminUsername = Auth::env('ONYX_ADMIN_USERNAME', $production ? '' : 'admin');
+$adminPasswordHash = Auth::env('ONYX_ADMIN_PASSWORD_HASH', $production ? '' : password_hash('admin123', PASSWORD_DEFAULT));
+
+if ($adminUsername === '' || $adminPasswordHash === '') {
+    Response::error('Admin credential belum dikonfigurasi', 500);
+}
+
+if ($username !== $adminUsername || !password_verify($password, $adminPasswordHash)) {
     Response::error('Username atau password admin salah', 401);
 }
 
-// Jika valid, backend mengirim cookie HttpOnly untuk admin.
-issueAdminAuthCookie();
+// Jika valid, backend mengirim signed HttpOnly cookie untuk admin.
+Auth::issueCookie('admin', $username);
 
 Response::json(['success' => true, 'data' => ['role' => 'admin', 'name' => 'Admin Onyx']]);

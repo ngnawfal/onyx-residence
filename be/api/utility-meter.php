@@ -9,6 +9,7 @@ require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
 require __DIR__ . '/../lib/Database.php';
 require __DIR__ . '/../lib/ApplicationMapper.php';
+require __DIR__ . '/../lib/Auth.php';
 
 // Endpoint ini dipakai admin Detail Kamar untuk input meter dan resident untuk melihat tagihan utility.
 $db = Database::connection();
@@ -19,12 +20,15 @@ if ($method === 'GET') {
     $room = trim((string) ($_GET['room'] ?? ''));
     $applicationId = trim((string) ($_GET['application_id'] ?? ''));
     if ($applicationId !== '') {
+        Auth::requireApplicationAccess($applicationId);
         $stmt = $db->prepare('SELECT * FROM utility_meters WHERE application_id = :application_id ORDER BY meter_month DESC, created_at DESC');
         $stmt->execute(['application_id' => $applicationId]);
     } elseif ($room !== '') {
+        Auth::requireAdmin();
         $stmt = $db->prepare('SELECT * FROM utility_meters WHERE room = :room ORDER BY meter_month DESC, created_at DESC');
         $stmt->execute(['room' => $room]);
     } else {
+        Auth::requireAdmin();
         $stmt = $db->query('SELECT * FROM utility_meters ORDER BY meter_month DESC, created_at DESC');
     }
     Response::json(['success' => true, 'data' => array_map([ApplicationMapper::class, 'utilityToApi'], $stmt->fetchAll())]);
@@ -32,6 +36,8 @@ if ($method === 'GET') {
 
 // POST/PATCH digunakan untuk membuat atau memperbarui meter bulanan.
 if ($method !== 'POST' && $method !== 'PATCH') Response::error('Method tidak diizinkan', 405);
+Auth::requireAdmin();
+Auth::requireCsrf();
 
 // Membaca input JSON dari form meter di Detail Kamar.
 $input = Request::input();

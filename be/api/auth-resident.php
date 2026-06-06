@@ -10,22 +10,12 @@ require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
 require __DIR__ . '/../lib/Database.php';
 require __DIR__ . '/../lib/ApplicationMapper.php';
-
-// Membuat cookie auth dari backend agar browser bisa menyimpannya sebagai HttpOnly.
-function issueResidentAuthCookie(): void
-{
-    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
-    setcookie('onyx-resident-auth', 'true', [
-        'expires' => time() + 86400,
-        'path' => '/',
-        'secure' => $isHttps,
-        'httponly' => true,
-        'samesite' => 'Strict',
-    ]);
-}
+require __DIR__ . '/../lib/Auth.php';
+require __DIR__ . '/../lib/RateLimit.php';
 
 // Login hanya boleh lewat POST agar username/password dikirim lewat body request.
 if (Request::method() !== 'POST') Response::error('Method tidak diizinkan', 405);
+RateLimit::check('resident-auth', 10, 600);
 
 // Membaca input JSON dari frontend login form.
 $input = Request::input();
@@ -45,7 +35,7 @@ $row = $stmt->fetch();
 if (!$row || !password_verify($password, (string) ($row['password_hash'] ?? ''))) Response::error('Email/WhatsApp atau password salah', 401);
 
 // Cookie HttpOnly tidak bisa dibaca JavaScript sehingga lebih aman dari pencurian token lewat XSS.
-issueResidentAuthCookie();
+Auth::issueCookie('resident', (string) $row['id']);
 
 // Jika valid, data resident dikembalikan dalam format API frontend.
 Response::json(['success' => true, 'data' => ApplicationMapper::toApi($row)]);

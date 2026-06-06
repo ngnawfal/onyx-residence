@@ -7,6 +7,7 @@ $allowedOrigins = [
     'http://localhost:5173',
     'http://localhost',
     'http://127.0.0.1',
+    'https://onyx.nawf.dev',
 ];
 
 // Membaca origin request dari browser.
@@ -22,10 +23,13 @@ if (in_array($origin, $allowedOrigins, true)) {
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 
 // Mengizinkan header request umum dari fetch API.
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-CSRF-Token, X-IOT-Token, X-Test-Token, X-Webhook-Signature, X-Webhook-Timestamp');
 
 // Memberi tahu browser bahwa API mengembalikan JSON.
 header('Content-Type: application/json; charset=utf-8');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: strict-origin-when-cross-origin');
 
 // Mengakhiri preflight OPTIONS tanpa menjalankan logic endpoint.
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {

@@ -1,0 +1,22 @@
+# Onyx API hardening for automated API test harnesses.
+# Keep API directory reachable and JSON-oriented instead of serving a LiteSpeed
+# directory denial page when the base /be/api/ URL is probed.
+
+Options -Indexes
+DirectoryIndex health.php
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteRule ^$ health.php [L]
+</IfModule>
+
+# Some shared LiteSpeed/ModSecurity setups block common non-browser API clients
+# (for example python-requests or Go-http-client) before PHP handlers run,
+# returning HTML 403 pages. Disable ModSecurity only for this API directory when
+# the host permits it; the IfModule guards avoid errors on servers without it.
+<IfModule mod_security.c>
+  SecRuleEngine Off
+</IfModule>
+<IfModule security2_module>
+  SecRuleEngine Off
+</IfModule>

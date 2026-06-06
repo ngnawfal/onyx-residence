@@ -8,11 +8,17 @@ require __DIR__ . '/../config/cors.php';
 require __DIR__ . '/../lib/Database.php';
 require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
+require __DIR__ . '/../lib/Auth.php';
 
 // Menjalankan endpoint di dalam try-catch agar error database aman ditangani.
 try {
     // Membaca metode HTTP untuk menentukan operasi CRUD.
     $method = Request::method();
+
+    if ($method !== 'GET') {
+        Auth::requireAdmin();
+        Auth::requireCsrf();
+    }
 
     // Membuat koneksi database PDO.
     $db = Database::connection();

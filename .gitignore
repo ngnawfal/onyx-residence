@@ -41,3 +41,10 @@ tmp_*
 # Package manager lock (keep package-lock.json though)
 # yarn.lock
 # pnpm-lock.yaml
+
+# Tool caches
+fe/.wrangler/
+.playwright-mcp/
+
+# Berisi kredensial hosting - JANGAN commit
+docs/DEPLOY_ONYX.md

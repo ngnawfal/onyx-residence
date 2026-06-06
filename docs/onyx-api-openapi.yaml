@@ -1,0 +1,651 @@
+openapi: 3.0.3
+info:
+  title: Onyx Residence API
+  version: 1.0.0
+  description: |
+    Backend PHP/MySQL API for Onyx Residence / KostKu.
+
+    Base URL for deployed testing:
+    https://onyx.nawf.dev/be/api
+
+    Auth notes:
+    - Admin demo login uses POST /admin-auth.php with username `admin` and password `admin123`.
+    - Admin login sets an HttpOnly cookie named `kostku-auth`.
+    - Resident login uses POST /auth-resident.php with email/phone and password created during registration.
+    - Most endpoints return JSON with `success` and either `data`, `message`, or `error`.
+servers:
+  - url: https://onyx.nawf.dev/be/api
+    description: Production backend
+tags:
+  - name: Health
+  - name: Auth
+  - name: Fixtures
+  - name: Rooms
+  - name: Residents
+  - name: Payments
+  - name: Utilities
+  - name: Access
+  - name: IoT
+  - name: Legacy
+
+paths:
+  /fixture.php:
+    get:
+      tags: [Fixtures]
+      summary: Create/fetch deterministic non-destructive API test fixtures
+      description: |
+        Initializes a safe resident/access fixture and returns IDs for chained tests.
+        Use `data.application_id` for resident-dependent endpoints and
+        `data.access_application_id` for `/access.php`.
+      responses:
+        '200':
+          description: Fixture IDs and sample credentials
+
+  /health.php:
+    get:
+      tags: [Health]
+      summary: Health check
+      responses:
+        '200':
+          description: Backend status
+
+  /admin-auth.php:
+    post:
+      tags: [Auth]
+      summary: Login admin and issue HttpOnly cookie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            examples:
+              admin:
+                value:
+                  username: admin
+                  password: admin123
+      responses:
+        '200':
+          description: Admin login success
+        '401':
+          description: Invalid admin credentials
+        '405':
+          description: Method not allowed
+
+  /auth-resident.php:
+    post:
+      tags: [Auth]
+      summary: Login resident with email or WhatsApp and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Resident login success
+        '401':
+          description: Invalid resident credentials
+        '405':
+          description: Method not allowed
+
+  /auth-logout.php:
+    post:
+      tags: [Auth]
+      summary: Clear admin/resident auth cookies
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum: [admin, resident]
+      responses:
+        '200':
+          description: Logout success
+
+  /admin-state.php:
+    get:
+      tags: [Residents, Payments, Utilities]
+      summary: Aggregate applications, payment proofs, and utility meters for admin dashboard
+      responses:
+        '200':
+          description: Admin aggregate state
+
+  /kamar.php:
+    get:
+      tags: [Rooms]
+      summary: List rooms
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+          description: Search room number/name
+        - name: status
+          in: query
+          schema: { type: string, enum: [tersedia, terisi, maintenance] }
+        - name: tipe
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Room list
+    post:
+      tags: [Rooms]
+      summary: Create room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RoomPayload'
+      responses:
+        '201':
+          description: Room created
+        '422':
+          description: Required field missing
+    put:
+      tags: [Rooms]
+      summary: Update room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/RoomPayload'
+                - type: object
+                  properties:
+                    id_kamar: { type: integer }
+      responses:
+        '200':
+          description: Room updated
+    patch:
+      tags: [Rooms]
+      summary: Update room
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/RoomPayload'
+                - type: object
+                  properties:
+                    id_kamar: { type: integer }
+      responses:
+        '200':
+          description: Room updated
+    delete:
+      tags: [Rooms]
+      summary: Delete room
+      parameters:
+        - name: id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Room deleted
+
+  /resident-application.php:
+    get:
+      tags: [Residents]
+      summary: List applications or get one by ID
+      parameters:
+        - name: id
+          in: query
+          schema: { type: string }
+          description: Application ID
+      responses:
+        '200':
+          description: Application data
+    post:
+      tags: [Residents]
+      summary: Create or upsert resident application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResidentApplication'
+      responses:
+        '200':
+          description: Application saved
+        '422':
+          description: Validation error
+    patch:
+      tags: [Residents]
+      summary: Update resident application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResidentApplication'
+      responses:
+        '200':
+          description: Application updated
+
+  /payment-proof.php:
+    get:
+      tags: [Payments]
+      summary: List manual transfer proofs
+      parameters:
+        - name: application_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Payment proofs
+    post:
+      tags: [Payments]
+      summary: Upload or review manual transfer proof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentProofPayload'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                proofFile:
+                  type: string
+                  format: binary
+                application_id:
+                  type: string
+                invoice:
+                  type: string
+                residentName:
+                  type: string
+                room:
+                  type: string
+                amount:
+                  type: number
+                senderBank:
+                  type: string
+                senderName:
+                  type: string
+      responses:
+        '200':
+          description: Proof saved/reviewed
+        '422':
+          description: Invalid upload or missing fields
+    patch:
+      tags: [Payments]
+      summary: Review payment proof
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentProofPayload'
+      responses:
+        '200':
+          description: Proof reviewed
+
+  /payment-create.php:
+    post:
+      tags: [Payments]
+      summary: Create BAYAR GG payment invoice/link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCreateRequest'
+      responses:
+        '200':
+          description: Payment link created
+        '422':
+          description: Payment method limit or invalid input
+
+  /payment-check.php:
+    get:
+      tags: [Payments]
+      summary: Check payment status by invoice
+      parameters:
+        - name: invoice
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Payment status
+        '422':
+          description: Missing invoice
+
+  /payment-webhook.php:
+    post:
+      tags: [Payments]
+      summary: BAYAR GG webhook receiver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Webhook accepted
+        '401':
+          description: Invalid signature if webhook secret is configured
+
+  /utility-meter.php:
+    get:
+      tags: [Utilities]
+      summary: List utility meter records
+      parameters:
+        - name: application_id
+          in: query
+          schema: { type: string }
+        - name: room
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Utility meters
+    post:
+      tags: [Utilities]
+      summary: Create/update utility meter reading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UtilityMeterPayload'
+      responses:
+        '200':
+          description: Meter saved
+        '422':
+          description: Validation error
+    patch:
+      tags: [Utilities]
+      summary: Update utility meter reading
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UtilityMeterPayload'
+      responses:
+        '200':
+          description: Meter updated
+
+  /service-ticket.php:
+    get:
+      tags: [Residents]
+      summary: List service tickets
+      parameters:
+        - name: application_id
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Tickets
+    post:
+      tags: [Residents]
+      summary: Create/update service ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceTicketPayload'
+      responses:
+        '200':
+          description: Ticket saved
+    patch:
+      tags: [Residents]
+      summary: Update service ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceTicketPayload'
+      responses:
+        '200':
+          description: Ticket updated
+
+  /access.php:
+    get:
+      tags: [Access]
+      summary: Get smart access state and logs for resident
+      parameters:
+        - name: application_id
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Access state and logs
+        '422':
+          description: Missing application_id
+    post:
+      tags: [Access]
+      summary: Update smart access state and insert log
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPayload'
+      responses:
+        '200':
+          description: Access updated
+    patch:
+      tags: [Access]
+      summary: Update smart access state and insert log
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccessPayload'
+      responses:
+        '200':
+          description: Access updated
+
+  /iot-ingest.php:
+    get:
+      tags: [IoT]
+      summary: Get latest IoT telemetry
+      parameters:
+        - name: room_code
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: IoT telemetry rows
+    post:
+      tags: [IoT]
+      summary: Ingest IoT telemetry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IotTelemetryPayload'
+      responses:
+        '200':
+          description: Telemetry saved
+        '422':
+          description: Missing/invalid room code
+
+  /tamu.php:
+    get:
+      tags: [Legacy]
+      summary: List legacy guests
+      responses:
+        '200': { description: Guest list }
+    post:
+      tags: [Legacy]
+      summary: Create legacy guest
+      responses:
+        '201': { description: Guest created }
+
+  /reservasi.php:
+    get:
+      tags: [Legacy]
+      summary: List legacy reservations
+      responses:
+        '200': { description: Reservation list }
+    post:
+      tags: [Legacy]
+      summary: Create legacy reservation
+      responses:
+        '201': { description: Reservation created }
+
+components:
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: Admin API-test fallback. Current live credential is onyx-admin / Onyx-BLY25-tHBSlyBuxCXKxVxZ9-.
+    CsrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+      description: Required for cookie-auth POST/PATCH/PUT/DELETE requests. Value must match onyx-csrf cookie.
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+
+    RoomPayload:
+      type: object
+      required: [no_kamar, id_kategori, nama_kamar, harga_per_bulan, status]
+      properties:
+        no_kamar: { type: string, example: A01 }
+        id_kategori: { type: integer, example: 1 }
+        nama_kamar: { type: string, example: Onyx Studio A01 }
+        harga_per_bulan: { type: number, example: 3100000 }
+        fasilitas: { type: string, example: AC, WiFi, kamar mandi dalam }
+        status:
+          type: string
+          enum: [tersedia, terisi, maintenance]
+
+    ResidentApplication:
+      type: object
+      required: [id, name, phone, email, room]
+      properties:
+        id: { type: string, example: APP-20250101010101-1234 }
+        name: { type: string }
+        phone: { type: string }
+        email: { type: string, format: email }
+        nik: { type: string }
+        address: { type: string }
+        occupation: { type: string }
+        room: { type: string, example: A01 - Onyx Studio }
+        leaseType: { type: string, example: Bulanan }
+        duration: { type: integer, example: 1 }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        monthlyBudget: { type: number }
+        deposit: { type: number }
+        emergencyContact: { type: string }
+        refundBank: { type: string }
+        refundAccount: { type: string }
+        refundAccountName: { type: string }
+        password: { type: string, format: password }
+        notes: { type: string }
+        applicationStatus: { type: string, example: Approved }
+        administrationStatus: { type: string, example: Dikonfirmasi Admin }
+
+    PaymentProofPayload:
+      type: object
+      properties:
+        id: { type: string }
+        application_id: { type: string }
+        invoice: { type: string }
+        residentName: { type: string }
+        room: { type: string }
+        senderBank: { type: string }
+        senderName: { type: string }
+        amount: { type: number }
+        status:
+          type: string
+          enum: [uploaded, approved, rejected]
+        action:
+          type: string
+          enum: [approve, reject]
+
+    PaymentCreateRequest:
+      type: object
+      required: [amount]
+      properties:
+        application_id: { type: string }
+        invoice: { type: string }
+        amount: { type: number, example: 500000 }
+        method: { type: string, example: qris }
+        description: { type: string }
+        customerName: { type: string }
+        customerEmail: { type: string }
+        customerPhone: { type: string }
+        redirectUrl: { type: string }
+
+    UtilityMeterPayload:
+      type: object
+      required: [application_id, room, month]
+      properties:
+        application_id: { type: string }
+        residentName: { type: string }
+        room: { type: string }
+        month: { type: string, example: 2025-01 }
+        electricKwh: { type: number, example: 25.5 }
+        waterM3: { type: number, example: 3.2 }
+        electricRate: { type: number, example: 1500 }
+        waterRate: { type: number, example: 8000 }
+        fixedFee: { type: number, example: 0 }
+        status: { type: string, example: Pending }
+
+    ServiceTicketPayload:
+      type: object
+      required: [application_id, category, issue]
+      properties:
+        id: { type: string }
+        application_id: { type: string }
+        category: { type: string, example: Maintenance }
+        priority: { type: string, example: Normal }
+        issue: { type: string, example: AC kurang dingin }
+        status: { type: string, example: open }
+
+    AccessPayload:
+      type: object
+      required: [application_id]
+      properties:
+        application_id: { type: string }
+        locked: { type: boolean }
+        guestPass: { type: string }
+        validUntil: { type: string }
+        action: { type: string }
+        detail: { type: string }
+        status: { type: string }
+
+    IotTelemetryPayload:
+      type: object
+      required: [roomCode]
+      properties:
+        roomCode: { type: string, example: A01 }
+        room_code: { type: string, example: A01 }
+        temperature: { type: number, example: 25.5 }
+        humidity: { type: number, example: 65 }
+        powerWatt: { type: number, example: 180 }
+        energyKwh: { type: number, example: 12.4 }
+        waterM3: { type: number, example: 3.2 }
+        acOn: { type: boolean }
+        lightOn: { type: boolean }
+        waterOn: { type: boolean }

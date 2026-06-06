@@ -8,12 +8,20 @@ require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
 require __DIR__ . '/../lib/BayarGG.php';
 require __DIR__ . '/../lib/Database.php';
+require __DIR__ . '/../lib/Auth.php';
 
 if (Request::method() !== 'POST') {
     Response::error('Method tidak diizinkan', 405);
 }
 
 $input = Request::input();
+$applicationId = trim((string) ($input['application_id'] ?? ''));
+if ($applicationId !== '') {
+    Auth::requireApplicationAccess($applicationId);
+} else {
+    Auth::requireAdmin();
+}
+Auth::requireCsrf();
 $amount = (int) ($input['amount'] ?? 0);
 
 if ($amount < 1000) {
@@ -57,7 +65,7 @@ try {
     $stmt = $db->prepare('INSERT INTO payment_invoices (id, application_id, provider_invoice_id, payment_url, description, amount, method, status, raw_response) VALUES (:id,:application_id,:provider_invoice_id,:payment_url,:description,:amount,:method,:status,:raw_response) ON DUPLICATE KEY UPDATE payment_url=VALUES(payment_url), status=VALUES(status), raw_response=VALUES(raw_response)');
     $stmt->execute([
         'id' => $invoiceId,
-        'application_id' => ($input['application_id'] ?? '') ?: null,
+        'application_id' => $applicationId !== '' ? $applicationId : null,
         'provider_invoice_id' => $invoiceId,
         'payment_url' => (string) ($payment['payment_url'] ?? ''),
         'description' => (string) $payload['description'],

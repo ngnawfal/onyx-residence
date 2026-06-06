@@ -9,19 +9,7 @@ require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
 require __DIR__ . '/../lib/Database.php';
 require __DIR__ . '/../lib/ApplicationMapper.php';
-
-// Membuat cookie auth dari backend setelah registrasi berhasil.
-function issueResidentAuthCookie(): void
-{
-    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
-    setcookie('onyx-resident-auth', 'true', [
-        'expires' => time() + 86400,
-        'path' => '/',
-        'secure' => $isHttps,
-        'httponly' => true,
-        'samesite' => 'Strict',
-    ]);
-}
+require __DIR__ . '/../lib/Auth.php';
 
 // Endpoint ini dipakai form booking/register untuk menyimpan aplikasi resident.
 $db = Database::connection();
@@ -31,12 +19,14 @@ $method = Request::method();
 if ($method === 'GET') {
     $id = trim((string) ($_GET['id'] ?? ''));
     if ($id !== '') {
+        Auth::requireApplicationAccess($id);
         $stmt = $db->prepare('SELECT * FROM resident_applications WHERE id = :id');
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch();
-        if (!$row) Response::error('Aplikasi tidak ditemukan', 404);
+        if (!$row) Response::json(['success' => true, 'data' => null, 'message' => 'Aplikasi belum tersimpan di database']);
         Response::json(['success' => true, 'data' => ApplicationMapper::toApi($row)]);
     }
+    Auth::requireAdmin();
     $rows = $db->query('SELECT * FROM resident_applications ORDER BY created_at ASC')->fetchAll();
     Response::json(['success' => true, 'data' => array_map([ApplicationMapper::class, 'toApi'], $rows)]);
 }
@@ -48,7 +38,19 @@ if ($method !== 'POST' && $method !== 'PATCH') {
 
 // Membaca body JSON, membuat ID aplikasi jika belum ada, lalu hash password.
 $input = Request::input();
+
+$requiredFields = ['name', 'phone', 'email', 'room'];
+foreach ($requiredFields as $field) {
+    if (trim((string) ($input[$field] ?? '')) === '') {
+        Response::error("Field {$field} wajib diisi", 422);
+    }
+}
+
 $id = (string) ($input['id'] ?? $input['application_id'] ?? ('APP-' . date('YmdHis') . '-' . random_int(100, 999)));
+if ($method === 'PATCH') {
+    Auth::requireApplicationAccess($id);
+    Auth::requireCsrf();
+}
 $password = (string) ($input['password'] ?? '');
 $passwordHash = $password !== '' ? password_hash($password, PASSWORD_DEFAULT) : null;
 $columns = array_column($db->query('DESCRIBE resident_applications')->fetchAll(), 'Field');
@@ -130,7 +132,7 @@ $savedData = $savedRow ? ApplicationMapper::toApi($savedRow) : [
 
 // Jika pendaftaran membawa password, resident langsung diberi cookie session HttpOnly.
 if ($password !== '') {
-    issueResidentAuthCookie();
+Auth::issueCookie('resident', $id);
 }
 
 Response::json(['success' => true, 'data' => $savedData]);

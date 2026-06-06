@@ -8,6 +8,7 @@ require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
 require __DIR__ . '/../lib/Database.php';
 require __DIR__ . '/../lib/ApplicationMapper.php';
+require __DIR__ . '/../lib/Auth.php';
 
 $db = Database::connection();
 $method = Request::method();
@@ -15,9 +16,11 @@ $method = Request::method();
 if ($method === 'GET') {
     $applicationId = trim((string) ($_GET['application_id'] ?? ''));
     if ($applicationId !== '') {
+        Auth::requireApplicationAccess($applicationId);
         $stmt = $db->prepare('SELECT * FROM payment_proofs WHERE application_id = :application_id ORDER BY created_at ASC');
         $stmt->execute(['application_id' => $applicationId]);
     } else {
+        Auth::requireAdmin();
         $stmt = $db->query('SELECT * FROM payment_proofs ORDER BY created_at ASC');
     }
     Response::json(['success' => true, 'data' => array_map([ApplicationMapper::class, 'proofToApi'], $stmt->fetchAll())]);
@@ -28,25 +31,38 @@ if ($method !== 'POST' && $method !== 'PATCH') {
 }
 
 $input = Request::input();
+$action = (string) ($input['action'] ?? 'upload');
+$applicationId = (string) ($input['application_id'] ?? '');
+if ($applicationId === '') Response::error('application_id wajib diisi', 422);
+if (in_array($action, ['approve', 'reject'], true)) {
+    Auth::requireAdmin();
+} else {
+    Auth::requireApplicationAccess($applicationId);
+}
+Auth::requireCsrf();
+
 if (!empty($_FILES['proofFile']) && is_uploaded_file($_FILES['proofFile']['tmp_name'])) {
     $uploadDir = __DIR__ . '/../storage/uploads';
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0775, true);
     $originalName = basename((string) $_FILES['proofFile']['name']);
+    $fileSize = (int) ($_FILES['proofFile']['size'] ?? 0);
+    if ($fileSize <= 0 || $fileSize > 5 * 1024 * 1024) Response::error('Ukuran bukti maksimal 5MB', 422);
     $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
     if (!in_array($extension, ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf'], true)) Response::error('Format bukti harus gambar atau PDF', 422);
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mimeType = $finfo->file($_FILES['proofFile']['tmp_name']) ?: '';
+    $allowedMime = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf'];
+    if (!in_array($mimeType, $allowedMime, true)) Response::error('MIME bukti tidak valid', 422);
     $safeName = preg_replace('/[^a-zA-Z0-9._-]+/', '-', pathinfo($originalName, PATHINFO_FILENAME));
     $storedName = 'proof-' . date('YmdHis') . '-' . random_int(100, 999) . '-' . $safeName . '.' . $extension;
     if (!move_uploaded_file($_FILES['proofFile']['tmp_name'], $uploadDir . '/' . $storedName)) Response::error('Gagal menyimpan file bukti', 500);
     $input['fileName'] = $originalName;
     $input['filePath'] = 'storage/uploads/' . $storedName;
     $input['fileUrl'] = '../storage/uploads/' . $storedName;
-    $input['mimeType'] = (string) ($_FILES['proofFile']['type'] ?? '');
-    $input['fileSize'] = (int) ($_FILES['proofFile']['size'] ?? 0);
+    $input['mimeType'] = $mimeType;
+    $input['fileSize'] = $fileSize;
 }
 
-$action = (string) ($input['action'] ?? 'upload');
-$applicationId = (string) ($input['application_id'] ?? '');
-if ($applicationId === '') Response::error('application_id wajib diisi', 422);
 $columns = array_column($db->query('DESCRIBE resident_applications')->fetchAll(), 'Field');
 $budgetColumn = in_array('monthly_budget', $columns, true) ? 'monthly_budget' : 'meter_monthly_budget';
 

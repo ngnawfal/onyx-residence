@@ -9,6 +9,7 @@ require __DIR__ . '/../config/cors.php';
 require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
 require __DIR__ . '/../lib/Database.php';
+require __DIR__ . '/../lib/Auth.php';
 
 // Membuka koneksi database dan membaca method HTTP.
 $db = Database::connection();
@@ -19,6 +20,7 @@ if ($method === 'GET') {
     // application_id wajib karena state akses selalu terikat ke aplikasi/resident tertentu.
     $appId = trim((string) ($_GET['application_id'] ?? ''));
     if ($appId === '') Response::error('application_id wajib diisi', 422);
+    Auth::requireApplicationAccess($appId);
 
     // Query state pintu terakhir: locked, guest_pass, valid_until.
     $state = $db->prepare('SELECT * FROM access_states WHERE application_id = :id');
@@ -39,6 +41,8 @@ if ($method !== 'POST' && $method !== 'PATCH') Response::error('Method tidak dii
 $input = Request::input();
 $appId = (string) ($input['application_id'] ?? '');
 if ($appId === '') Response::error('application_id wajib diisi', 422);
+Auth::requireApplicationAccess($appId);
+Auth::requireCsrf();
 
 // Normalisasi data akses dari frontend.
 $locked = !empty($input['locked']) ? 1 : 0;

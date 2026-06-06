@@ -7,6 +7,7 @@ require __DIR__ . '/../config/cors.php';
 require __DIR__ . '/../lib/Request.php';
 require __DIR__ . '/../lib/Response.php';
 require __DIR__ . '/../lib/Database.php';
+require __DIR__ . '/../lib/Auth.php';
 
 $db = Database::connection();
 $method = Request::method();
@@ -31,6 +32,7 @@ function iotRowToApi(array $row): array
 
 // GET dipakai admin/resident untuk mengambil telemetry terbaru per kamar atau semua kamar.
 if ($method === 'GET') {
+    if (!Auth::user()) Response::error('Unauthorized telemetry access', 401);
     $roomCode = trim((string) ($_GET['room_code'] ?? $_GET['room'] ?? ''));
     if ($roomCode !== '') {
         $stmt = $db->prepare('SELECT * FROM iot_room_telemetry WHERE room_code = :room_code ORDER BY created_at DESC, id DESC LIMIT 1');
@@ -45,6 +47,15 @@ if ($method === 'GET') {
 
 // POST dipakai ESP32/Wokwi untuk mengirim telemetry sensor ke backend.
 if ($method !== 'POST') Response::error('Method tidak diizinkan', 405);
+
+$iotToken = Auth::env('ONYX_IOT_TOKEN');
+if ($iotToken !== '') {
+    $providedToken = $_SERVER['HTTP_X_IOT_TOKEN'] ?? '';
+    if (!hash_equals($iotToken, $providedToken)) Response::error('Invalid IoT token', 401);
+} else {
+    Auth::requireAdmin();
+    Auth::requireCsrf();
+}
 
 // Membaca payload JSON dari ESP32 lalu validasi roomCode agar aman untuk query/filter.
 $input = Request::input();

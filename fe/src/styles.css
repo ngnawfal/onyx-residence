@@ -3679,6 +3679,7 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper { padding: 0; }
 .section-panel { padding: .9rem; }
 .admin-flat-panel {
   display: grid;
+  align-content: start; /* cegah baris menggelembung saat panel di-stretch setinggi viewport */
   gap: .9rem;
   width: 100%;
   padding: 0;
@@ -4829,8 +4830,9 @@ input[type="date"]::-webkit-datetime-edit-fields-wrapper { padding: 0; }
 /* Tambah Kamar page: kartu rapi, form 2 kolom, lebar terbatas */
 .room-create-page {
   display: grid;
-  gap: .6rem;
-  max-width: none;
+  align-content: start;
+  gap: .85rem;
+  max-width: 64rem;
   width: 100%;
   padding: 1rem 1.15rem;
   border: 1px solid rgba(247,242,234,.08);

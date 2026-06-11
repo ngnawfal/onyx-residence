@@ -12,7 +12,7 @@ require __DIR__ . '/../lib/Auth.php';
 Auth::requireAdmin();
 
 $db = Database::connection();
-$apps = $db->query('SELECT * FROM resident_applications ORDER BY created_at ASC')->fetchAll();
+$apps = $db->query("SELECT * FROM resident_applications WHERE LOWER(COALESCE(application_status, '')) NOT IN ('dibatalkan', 'dihapus') ORDER BY created_at ASC")->fetchAll();
 $proofs = $db->query('SELECT * FROM payment_proofs ORDER BY created_at ASC')->fetchAll();
 $utilities = $db->query('SELECT * FROM utility_meters ORDER BY meter_month DESC, created_at DESC')->fetchAll();
 

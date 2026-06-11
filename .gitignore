@@ -1,50 +1,102 @@
-# Dependencies
-node_modules/
+# ==============================================================
+# Kredensial & Secrets — JANGAN PERNAH COMMIT
+# ==============================================================
 
-# Build output
-dist/
-
-# Environment / secrets (credentials di config sudah default dev, aman)
+# --- Environment variables ---
 .env
 .env.local
 .env.*.local
+.env.development
+.env.production
+.env.staging
 
+# --- Backend config (bisa berisi DB / payment credentials asli) ---
+be/config/secrets.php
+be/config/database.local.php
+be/config/*.secret.php
+
+# --- API keys & credentials files ---
+credentials.*
+secret*
+*credential*.json
+*service-account*.json
+serviceAccountKey.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+known_hosts
+authorized_keys
+.htpasswd
+.netrc
+
+# --- Deploy & hosting credentials ---
+docs/DEPLOY_ONYX.md
+docs/deploy*.md
+
+# ==============================================================
+# Dependencies
+# ==============================================================
+node_modules/
+
+# ==============================================================
+# Build output
+# ==============================================================
+dist/
+
+# ==============================================================
 # OS files
+# ==============================================================
 .DS_Store
 Thumbs.db
 desktop.ini
 
+# ==============================================================
 # IDE
+# ==============================================================
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
+# ==============================================================
 # Uploads / user-generated content
+# ==============================================================
 be/storage/uploads/*
 !be/storage/uploads/.gitkeep
 
+# ==============================================================
 # JSON store data (runtime state, bukan source)
+# ==============================================================
 be/storage/applications.json
 be/storage/payment-proofs.json
 be/storage/utility-meters.json
 
-# Temp files
+# ==============================================================
+# Temp & log files
+# ==============================================================
 tmp_*
 *.tmp
 *.log
+npm-debug.log*
+yarn-error.log*
+yarn-debug.log*
 
-# Vite cache
+# ==============================================================
+# Framework & tool caches
+# ==============================================================
 .vite/
-
-# Package manager lock (keep package-lock.json though)
-# yarn.lock
-# pnpm-lock.yaml
-
-# Tool caches
 fe/.wrangler/
 .playwright-mcp/
 
-# Berisi kredensial hosting - JANGAN commit
-docs/DEPLOY_ONYX.md
+# ==============================================================
+# Package manager lock (keep if needed)
+# ==============================================================
+# yarn.lock
+# pnpm-lock.yaml

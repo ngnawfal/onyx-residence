@@ -27,7 +27,7 @@ if ($method === 'GET') {
         Response::json(['success' => true, 'data' => ApplicationMapper::toApi($row)]);
     }
     Auth::requireAdmin();
-    $rows = $db->query('SELECT * FROM resident_applications ORDER BY created_at ASC')->fetchAll();
+    $rows = $db->query("SELECT * FROM resident_applications WHERE LOWER(COALESCE(application_status, '')) NOT IN ('dibatalkan', 'dihapus') ORDER BY created_at ASC")->fetchAll();
     Response::json(['success' => true, 'data' => array_map([ApplicationMapper::class, 'toApi'], $rows)]);
 }
 
@@ -39,6 +39,31 @@ if ($method !== 'POST' && $method !== 'PATCH') {
 // Membaca body JSON, membuat ID aplikasi jika belum ada, lalu hash password.
 $input = Request::input();
 
+$id = (string) ($input['id'] ?? $input['application_id'] ?? '');
+if ($method === 'PATCH' && $id !== '') {
+    Auth::requireApplicationAccess($id);
+    Auth::requireCsrf();
+
+    $fields = [];
+    $params = ['id' => $id];
+    if (array_key_exists('applicationStatus', $input) || array_key_exists('application_status', $input)) {
+        $fields[] = 'application_status = :application_status';
+        $params['application_status'] = (string) ($input['applicationStatus'] ?? $input['application_status']);
+    }
+    if (array_key_exists('administrationStatus', $input) || array_key_exists('administration_status', $input)) {
+        $fields[] = 'administration_status = :administration_status';
+        $params['administration_status'] = (string) ($input['administrationStatus'] ?? $input['administration_status']);
+    }
+    if ($fields !== []) {
+        $stmt = $db->prepare('UPDATE resident_applications SET ' . implode(', ', $fields) . ' WHERE id = :id');
+        $stmt->execute($params);
+        $stmt = $db->prepare('SELECT * FROM resident_applications WHERE id = :id');
+        $stmt->execute(['id' => $id]);
+        $savedRow = $stmt->fetch();
+        Response::json(['success' => true, 'data' => $savedRow ? ApplicationMapper::toApi($savedRow) : null]);
+    }
+}
+
 $requiredFields = ['name', 'phone', 'email', 'room'];
 foreach ($requiredFields as $field) {
     if (trim((string) ($input[$field] ?? '')) === '') {
@@ -46,7 +71,7 @@ foreach ($requiredFields as $field) {
     }
 }
 
-$id = (string) ($input['id'] ?? $input['application_id'] ?? ('APP-' . date('YmdHis') . '-' . random_int(100, 999)));
+$id = $id !== '' ? $id : ('APP-' . date('YmdHis') . '-' . random_int(100, 999));
 if ($method === 'PATCH') {
     Auth::requireApplicationAccess($id);
     Auth::requireCsrf();

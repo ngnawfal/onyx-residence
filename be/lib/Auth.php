@@ -145,6 +145,32 @@ final class Auth
         }
     }
 
+    public static function requireGroupChat(): void
+    {
+        if (!empty($_COOKIE[self::ADMIN_COOKIE])) {
+            $payload = self::verifySignedPayload($_COOKIE[self::ADMIN_COOKIE]);
+            if (!$payload) Response::error('Sesi admin tidak valid', 401);
+            return;
+        }
+        if (!empty($_COOKIE[self::RESIDENT_COOKIE])) {
+            $payload = self::verifySignedPayload($_COOKIE[self::RESIDENT_COOKIE]);
+            if (!$payload) Response::error('Sesi resident tidak valid', 401);
+            return;
+        }
+        if (self::basicAdminUser()) return;
+        Response::error('Harus login untuk mengakses chat', 401);
+    }
+
+    public static function verifySignedPayload(string $cookieValue): ?array
+    {
+        if ($cookieValue === '' || !str_contains($cookieValue, '.')) return null;
+        [$encodedPayload, $signature] = explode('.', $cookieValue, 2);
+        $expected = hash_hmac('sha256', $encodedPayload, self::secret());
+        if (!hash_equals($expected, $signature)) return null;
+        $payload = json_decode(self::base64UrlDecode($encodedPayload), true);
+        return is_array($payload) ? $payload : null;
+    }
+
     private static function csrfForToken(string $token): string
     {
         return hash_hmac('sha256', $token, self::secret());

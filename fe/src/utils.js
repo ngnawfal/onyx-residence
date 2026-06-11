@@ -1,35 +1,26 @@
-/**
- * @description Format angka menjadi Rupiah tanpa pecahan desimal.
- * @param {number} value Nilai uang yang akan diformat.
- * @returns {string} Nilai dalam format Rupiah.
- */
-export function rupiah(value) {
+export function escapeHtml(value = '') {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export function rupiah(value = 0) {
+  const amount = Number(String(value).replace(/[^0-9.-]/g, '')) || 0;
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(amount);
 }
 
-/**
- * @description Mengubah string menjadi teks aman untuk atribut HTML sederhana.
- * @param {string} value Teks mentah.
- * @returns {string} Teks yang sudah di-escape.
- */
-export function escapeHtml(value) {
+export function slug(value = '') {
   return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
-
-/**
- * @description Membuat id slug pendek dari teks.
- * @param {string} value Teks input.
- * @returns {string} Slug lowercase.
- */
-export function slug(value) {
-  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item';
 }

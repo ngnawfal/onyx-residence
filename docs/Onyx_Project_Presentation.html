@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Dokumentasi Presentasi Project Onyx Residence</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    body { font-family: Arial, sans-serif; color: #172033; line-height: 1.55; }
+    h1 { font-size: 28px; margin: 0 0 8px; color: #111827; }
+    h2 { font-size: 20px; margin: 28px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #f59e0b; color: #111827; }
+    h3 { font-size: 15px; margin: 18px 0 6px; color: #92400e; }
+    p, li { font-size: 11.5px; }
+    code { font-family: Consolas, monospace; font-size: 10.5px; background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+    pre { font-family: Consolas, monospace; font-size: 10px; background: #111827; color: #f9fafb; padding: 10px; border-radius: 8px; white-space: pre-wrap; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 14px; font-size: 10.5px; }
+    th, td { border: 1px solid #d1d5db; padding: 6px; vertical-align: top; }
+    th { background: #fef3c7; text-align: left; }
+    .cover { min-height: 88vh; display: flex; flex-direction: column; justify-content: center; }
+    .badge { display: inline-block; background: #111827; color: #fff; padding: 4px 8px; border-radius: 999px; font-size: 11px; margin-right: 4px; }
+    .note { border-left: 4px solid #f59e0b; background: #fffbeb; padding: 8px 10px; }
+    .page-break { page-break-before: always; }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <p><span class="badge">PPL UAS</span><span class="badge">Fullstack Web</span><span class="badge">Onyx Residence</span></p>
+    <h1>Dokumentasi Presentasi Project Onyx Residence / KostKu</h1>
+    <p><strong>Topik:</strong> Sistem informasi kos/residence berbasis web untuk booking, admin kamar, penghuni, pembayaran, utilitas, laporan, dan chat.</p>
+    <p><strong>Live URL:</strong> <code>https://onyx.nawf.dev/</code></p>
+    <p><strong>Stack:</strong> Vite Vanilla JavaScript + CSS, PHP Native API, MySQL, Apache/LiteSpeed hosting.</p>
+    <p class="note">Dokumen ini menjelaskan project sesuai implementasi lokal: lokasi file, CRUD, search, print, command program, dan alur fitur utama untuk bahan presentasi ke dosen.</p>
+  </section>
+
+  <h2>1. Ringkasan Project</h2>
+  <p>Onyx Residence adalah aplikasi manajemen kos/residence. Aplikasi memiliki halaman publik untuk calon penghuni, portal penghuni untuk status pendaftaran dan pembayaran, serta admin panel untuk mengelola kamar, penghuni, bukti pembayaran, meter utilitas, layanan, laporan keuangan, dan chat grup.</p>
+  <ul>
+    <li><strong>Public page:</strong> landing page dan booking/register calon penghuni.</li>
+    <li><strong>Resident portal:</strong> login penghuni, invoice, upload bukti, utilitas, layanan, access, chat.</li>
+    <li><strong>Admin panel:</strong> dashboard, CRUD kamar, data penghuni, payment detail, utility meter, laporan, chat.</li>
+    <li><strong>Backend:</strong> REST-like API PHP native dengan PDO MySQL, auth, CSRF, upload proof, dan response JSON.</li>
+  </ul>
+
+  <h2>2. Struktur Folder Project</h2>
+  <table>
+    <tr><th>Path</th><th>Fungsi</th></tr>
+    <tr><td><code>fe/</code></td><td>Frontend Vite. Source ada di <code>fe/src</code>, hasil build di <code>fe/dist</code>.</td></tr>
+    <tr><td><code>fe/src/main.js</code></td><td>Logika utama frontend: state, routing, render halaman, event listener, sinkron API, CRUD UI, search, print.</td></tr>
+    <tr><td><code>fe/src/styles.css</code></td><td>CSS utama semua halaman: public page, admin panel, payment detail, penghuni, print layout.</td></tr>
+    <tr><td><code>fe/src/data.js</code></td><td>Seed/fallback data kamar awal.</td></tr>
+    <tr><td><code>fe/src/utils.js</code></td><td>Helper kecil seperti <code>escapeHtml</code>, <code>rupiah</code>, dan <code>slug</code>.</td></tr>
+    <tr><td><code>be/api/</code></td><td>Endpoint PHP untuk admin auth, kamar, penghuni, payment, utility, chat, layanan, access, IoT.</td></tr>
+    <tr><td><code>be/lib/</code></td><td>Library backend: auth, database mapper, rate limit, response, request.</td></tr>
+    <tr><td><code>be/config/</code></td><td>Konfigurasi CORS, database, secret loader, payment config.</td></tr>
+    <tr><td><code>be/storage/uploads/</code></td><td>Storage bukti pembayaran yang diupload penghuni.</td></tr>
+    <tr><td><code>docs/</code></td><td>Dokumentasi project, deployment, dan dokumen presentasi ini.</td></tr>
+  </table>
+
+  <h2>3. Teknologi yang Digunakan</h2>
+  <ul>
+    <li><strong>Frontend:</strong> Vite, JavaScript module, HTML template, CSS custom tanpa framework UI.</li>
+    <li><strong>Backend:</strong> PHP native, PDO MySQL, JSON API.</li>
+    <li><strong>Database:</strong> MySQL, tabel utama seperti <code>resident_applications</code>, <code>kamar</code>, <code>payment_proofs</code>, <code>utility_meters</code>, <code>service_tickets</code>, <code>group_chat</code>.</li>
+    <li><strong>Security:</strong> session/cookie auth, Basic admin fallback, CSRF header <code>X-CSRF-Token</code>, CORS, upload MIME check, rate limit.</li>
+    <li><strong>Deploy:</strong> build Vite lalu upload <code>dist</code> dan backend PHP ke hosting.</li>
+  </ul>
+
+  <h2>4. Command Program</h2>
+  <h3>Frontend lokal</h3>
+  <pre>cd fe
+npm install
+npm run dev
+npm run build
+npm run preview</pre>
+  <h3>Validasi</h3>
+  <pre>php -l be/api/resident-application.php
+php -l be/api/admin-state.php
+cd fe
+npm run build</pre>
+  <h3>Deploy template aman</h3>
+  <pre>cd fe
+npm run build
+plink -batch -pw "&lt;PASSWORD&gt;" -hostkey "&lt;HOSTKEY&gt;" &lt;USER&gt;@&lt;HOST&gt; "rm -rf domains/onyx.nawf.dev/public_html/assets &amp;&amp; mkdir -p domains/onyx.nawf.dev/public_html/assets"
+pscp -batch -pw "&lt;PASSWORD&gt;" -hostkey "&lt;HOSTKEY&gt;" -r dist\index.html dist\favicon.svg dist\assets &lt;USER&gt;@&lt;HOST&gt;:domains/onyx.nawf.dev/public_html/</pre>
+
+  <h2>5. Arsitektur Alur Sistem</h2>
+  <ol>
+    <li>User membuka public page lalu melakukan booking/register.</li>
+    <li>Frontend mengirim data ke API <code>be/api/resident-application.php</code>.</li>
+    <li>Admin login melalui <code>be/api/admin-auth.php</code>.</li>
+    <li>Admin panel mengambil state gabungan dari <code>be/api/admin-state.php</code>.</li>
+    <li>Admin mengelola kamar, penghuni, bukti pembayaran, meter utilitas, laporan, dan chat.</li>
+    <li>Resident portal membaca status aplikasi, invoice, upload bukti, dan chat via API.</li>
+  </ol>
+
+  <h2>6. Bagian CRUD</h2>
+  <table>
+    <tr><th>Modul</th><th>Frontend</th><th>Backend</th><th>CRUD</th></tr>
+    <tr><td>Kamar</td><td><code>fe/src/main.js</code>: <code>renderRoomsPanel()</code>, <code>renderRoomRow()</code>, <code>#roomForm</code>, <code>data-room-delete</code></td><td><code>be/api/kamar.php</code></td><td>GET daftar kamar; POST tambah kamar; PUT/PATCH update kamar; DELETE hapus kamar.</td></tr>
+    <tr><td>Penghuni</td><td><code>renderResidentsAdminPanel()</code>, <code>renderAdminPersonDetail()</code>, <code>confirmResidentDelete</code></td><td><code>be/api/resident-application.php</code>, <code>be/api/admin-state.php</code></td><td>POST daftar penghuni; GET baca data; PATCH ubah status/approve/batalkan; hapus admin memakai status <code>Dibatalkan</code> agar tidak muncul lagi.</td></tr>
+    <tr><td>Pembayaran</td><td><code>renderPaymentsAdminPanel()</code>, Payment Detail, <code>data-payment-detail</code>, <code>data-approve-payment</code>, <code>data-reject-payment</code></td><td><code>be/api/payment-proof.php</code>, <code>be/api/payment-create.php</code></td><td>GET bukti; POST upload bukti; PATCH approve/reject bukti; create payment QRIS.</td></tr>
+    <tr><td>Utility Meter</td><td><code>renderAdminUtilityMeterModal()</code>, submit <code>utilityMeterForm</code></td><td><code>be/api/utility-meter.php</code></td><td>GET meter; POST/PATCH catatan meter listrik/air.</td></tr>
+    <tr><td>Layanan</td><td>Resident/admin service ticket panel di <code>main.js</code></td><td><code>be/api/service-ticket.php</code></td><td>GET ticket; POST/PATCH ticket layanan.</td></tr>
+    <tr><td>Chat</td><td><code>renderAdminChatPanel()</code>, resident chat panel, polling 5 detik</td><td><code>be/api/chat.php</code></td><td>GET pesan; POST pesan grup.</td></tr>
+  </table>
+
+  <h2>7. Bagian Search dan Filter</h2>
+  <table>
+    <tr><th>Fitur</th><th>Lokasi</th><th>Penjelasan</th></tr>
+    <tr><td>Search Kamar</td><td><code>fe/src/main.js</code> baris render <code>adminRoomSearchProxy</code>; event di <code>bindEvents()</code></td><td>Input mengisi <code>state.roomQuery</code>, lalu <code>renderRoomsPanel()</code> memfilter kamar berdasarkan nomor/nama kamar.</td></tr>
+    <tr><td>Filter Tipe/Status Kamar</td><td><code>#typeFilter</code>, <code>#statusFilter</code></td><td>State <code>roomType</code> dan <code>roomStatus</code> dipakai untuk memfilter list kamar.</td></tr>
+    <tr><td>Search Penghuni</td><td><code>#adminResidentSearch</code>, <code>state.residentQuery</code></td><td>Mencari nama penghuni, kamar, telepon, email, dan NIK. Hasil langsung dirender ulang tanpa reload.</td></tr>
+    <tr><td>Payment Detail Tab</td><td><code>data-payment-section</code></td><td>Tab Ringkasan, Metode Bayar, Bukti Masuk memakai <code>state.activePaymentSection</code>.</td></tr>
+  </table>
+
+  <h2>8. Bagian Print / Cetak</h2>
+  <table>
+    <tr><th>Fitur Cetak</th><th>Lokasi</th><th>Isi Cetak</th></tr>
+    <tr><td>Cetak Laporan Kamar</td><td><code>renderRoomsPrintReport()</code>, tombol <code>#printRooms</code></td><td>Daftar kamar, status, penghuni, smart control, dan utilitas.</td></tr>
+    <tr><td>Cetak Laporan Keuangan</td><td><code>renderCashflowPrintReport()</code>, tombol <code>#printCashflow</code></td><td>Transaksi, pemasukan, outstanding, deposit, dan tagihan utilitas tercatat. Utilitas tidak otomatis mengurangi omset.</td></tr>
+    <tr><td>Cetak Identitas Penghuni</td><td><code>renderAdminPersonDetail()</code>, tombol <code>#printResidentDetail</code></td><td>Identitas, kontrak, keuangan, status administrasi penghuni/penyewa.</td></tr>
+  </table>
+
+  <h2>9. Penjelasan Fitur Utama Admin</h2>
+  <h3>Dashboard</h3>
+  <p>Dashboard menampilkan KPI pendapatan, kamar terisi/kosong, chart pendapatan 6 bulan, occupancy, penghuni terbaru, dan transaksi terbaru. Fungsi utama ada di <code>renderDashboard()</code>.</p>
+  <h3>Menu Kamar</h3>
+  <p>Menu Kamar menampilkan daftar kamar dengan search, filter tipe/status, tambah/edit/hapus kamar, detail kamar, smart control, meter utilitas, dan cetak laporan kamar. Data server diambil dari <code>kamar.php</code>.</p>
+  <h3>Menu Penghuni</h3>
+  <p>Menu Penghuni menampilkan list penghuni dan penyewa. Fitur baru: search nama/kamar/kontak/NIK dan cetak detail identitas. Hapus penghuni tidak menghapus fisik langsung, tetapi menandai status <code>Dibatalkan</code> supaya aman dan tidak muncul lagi di admin state.</p>
+  <h3>Menu Pembayaran</h3>
+  <p>Payment Detail dirapikan menjadi sidebar buyer, tab Ringkasan, Metode Bayar, dan Bukti Masuk. Admin dapat melihat status, total tagihan, QRIS, transfer manual, dan approve/reject bukti.</p>
+  <h3>Menu Laporan</h3>
+  <p>Laporan keuangan menampilkan transaksi, pemasukan, outstanding, deposit, dan tagihan utilitas tercatat. Catatan penting: tagihan utilitas sekarang tidak dikurangi dari omset karena dalam konteks project biaya tersebut adalah data meter/tagihan penghuni, bukan otomatis beban pemilik kost.</p>
+
+  <h2>10. API Backend Penting</h2>
+  <ul>
+    <li><code>be/api/admin-auth.php</code>: login admin.</li>
+    <li><code>be/api/admin-state.php</code>: agregasi data admin panel.</li>
+    <li><code>be/api/resident-application.php</code>: pendaftaran dan status penghuni.</li>
+    <li><code>be/api/kamar.php</code>: CRUD kamar.</li>
+    <li><code>be/api/payment-proof.php</code>: upload/review bukti pembayaran.</li>
+    <li><code>be/api/payment-create.php</code>: membuat pembayaran QRIS.</li>
+    <li><code>be/api/utility-meter.php</code>: catatan listrik/air.</li>
+    <li><code>be/api/service-ticket.php</code>: tiket layanan penghuni.</li>
+    <li><code>be/api/chat.php</code>: chat grup admin-penghuni.</li>
+  </ul>
+
+  <h2>11. Keamanan</h2>
+  <ul>
+    <li>Endpoint admin dilindungi <code>Auth::requireAdmin()</code>.</li>
+    <li>Request mutasi data memakai CSRF via <code>X-CSRF-Token</code>.</li>
+    <li>Upload bukti pembayaran dibatasi ukuran dan MIME type.</li>
+    <li>Response API memakai JSON konsisten.</li>
+    <li>Frontend menggunakan <code>escapeHtml()</code> untuk menghindari injection pada data yang dirender.</li>
+  </ul>
+
+  <h2>12. Kesimpulan</h2>
+  <p>Project Onyx Residence sudah mencakup alur bisnis kos dari pendaftaran sampai manajemen admin. Bagian yang bisa ditunjukkan saat presentasi: public booking, login admin, CRUD kamar, search penghuni, payment detail, review bukti, catat meter utilitas, laporan print, dan chat grup. Project ini menunjukkan integrasi frontend, backend API, database, autentikasi, upload file, dan UI admin yang siap dipakai untuk operasional kos.</p>
+</body>
+</html>

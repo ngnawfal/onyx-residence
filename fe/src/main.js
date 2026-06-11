@@ -26,7 +26,7 @@ if (window.localStorage.getItem('onyx-db-clean-v4') !== 'true') {
 }
 
 // Daftar id section admin yang valid; dipakai untuk routing clean URL /admin/<section>.
-const adminSectionIds = ['dashboard', 'kamar', 'penghuni', 'pembayaran', 'utilities', 'layanan', 'laporan'];
+const adminSectionIds = ['dashboard', 'kamar', 'penghuni', 'pembayaran', 'utilities', 'layanan', 'laporan', 'chat'];
 
 // Helper base path: dukung deploy di subfolder /PPL_UAS (Apache) maupun root (Vite/hosting).
 function appBasePath() {
@@ -47,6 +47,7 @@ const state = {
   roomQuery: '',
   roomType: '',
   roomStatus: '',
+  residentQuery: '',
   adminRoomDetail: null,
   activeRoomDetailSection: 'overview',
   isRoomCreateOpen: false,
@@ -59,6 +60,9 @@ const state = {
   activeResidentSection: 'overview',
   isTicketModalOpen: false,
   isQrModalOpen: false,
+  isUtilityMeterModalOpen: false,
+  residentDeleteTarget: null,
+  residentRenewalIntent: JSON.parse(window.localStorage.getItem('onyx-renewal-intent') || 'null'),
   manualTransferInvoice: null,
   manualProofUploadProgress: null,
   isAuthenticated: window.sessionStorage.getItem('kostku-admin-session') === 'true',
@@ -73,6 +77,7 @@ const adminMenu = [
   { id: 'utilities', label: 'Utilitas', icon: 'fa-bolt' },
   { id: 'layanan', label: 'Layanan', icon: 'fa-screwdriver-wrench' },
   { id: 'laporan', label: 'Laporan', icon: 'fa-file-invoice' },
+  { id: 'chat', label: 'Chat', icon: 'fa-comments' },
 ];
 const manualTransferAccount = {
   bank: 'BCA',
@@ -597,19 +602,18 @@ function getRoomOccupancyStats() {
  * @returns {string} Markup option select kamar.
  */
 function renderRoomOptions() {
-  return getRooms().map((room) => {
-    const status = getEffectiveRoomStatus(room);
-    const disabled = status !== 'tersedia';
-    return `<option value="${room.no} - ${escapeHtml(room.name)}" data-price="${room.price}" ${disabled ? 'disabled' : ''}>${escapeHtml(roomOptionLabel(room))}${disabled ? ` · ${status === 'terisi' ? 'Tidak tersedia' : status}` : ''}</option>`;
+  return getRooms().filter((room) => getEffectiveRoomStatus(room) === 'tersedia').map((room) => {
+    return `<option value="${room.no} - ${escapeHtml(room.name)}" data-price="${room.price}">${escapeHtml(roomOptionLabel(room))}</option>`;
   }).join('');
 }
 
 function renderCustomRoomPicker() {
-  const rooms = getRooms();
-  const firstAvailable = rooms.find((room) => getEffectiveRoomStatus(room) === 'tersedia') || rooms[0];
-  const value = firstAvailable ? `${firstAvailable.no} - ${firstAvailable.name}` : '';
-  const label = firstAvailable ? roomOptionLabel(firstAvailable) : 'Pilih kamar';
-  return `<div class="custom-select" data-custom-select="room"><input type="hidden" name="room" value="${escapeHtml(value)}" /><button class="custom-select__button" type="button" aria-expanded="false"><span>${escapeHtml(label)}</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button><div class="custom-select__menu" role="listbox">${rooms.map((room) => { const status = getEffectiveRoomStatus(room); const disabled = status !== 'tersedia'; return `<button type="button" role="option" data-custom-option="room" data-value="${escapeHtml(`${room.no} - ${room.name}`)}" ${disabled ? 'disabled' : ''}><span>${escapeHtml(room.no)} · ${escapeHtml(room.name)}</span><strong>${escapeHtml(room.type)} · ${rupiah(room.price)}/bulan</strong>${disabled ? `<small>${status === 'terisi' ? 'Tidak tersedia' : escapeHtml(status)}</small>` : '<small>Tersedia untuk dipilih</small>'}</button>`; }).join('')}</div></div>`;
+  const rooms = getRooms().filter((room) => getEffectiveRoomStatus(room) === 'tersedia');
+  if (rooms.length === 0) return '<p class="empty-hint">Semua kamar sedang terisi penuh.</p>';
+  const firstAvailable = rooms[0];
+  const value = `${firstAvailable.no} - ${firstAvailable.name}`;
+  const label = roomOptionLabel(firstAvailable);
+  return `<div class="custom-select" data-custom-select="room"><input type="hidden" name="room" value="${escapeHtml(value)}" /><button class="custom-select__button" type="button" aria-expanded="false"><span>${escapeHtml(label)}</span><i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button><div class="custom-select__menu" role="listbox">${rooms.map((room) => `<button type="button" role="option" data-custom-option="room" data-value="${escapeHtml(`${room.no} - ${room.name}`)}"><span>${escapeHtml(room.no)} · ${escapeHtml(room.name)}</span><strong>${escapeHtml(room.type)} · ${rupiah(room.price)}/bulan</strong><small>Tersedia untuk dipilih</small></button>`).join('')}</div></div>`;
 }
 
 function renderCustomLeasePicker() {
@@ -673,6 +677,8 @@ function getAdminResidents() {
   const backendState = JSON.parse(window.localStorage.getItem('onyx-admin-state') || 'null');
   const applications = backendState?.applications || backendState?.data?.applications || [];
   return applications.filter((item) => item.name && !['Harian', 'Mingguan'].includes(item.leaseType)).map((item) => ({
+    id: item.id,
+    raw: item,
     category: 'Long Stay',
     name: item.name,
     room: item.room || '-',
@@ -683,6 +689,10 @@ function getAdminResidents() {
     start: item.startDate || '',
     end: item.endDate || '',
     billing: item.monthlyBudget ? rupiah(Number(item.monthlyBudget)) : '-',
+    nextBilling: item.monthlyBudget
+      ? rupiah(Number(item.monthlyBudget) * (item.leaseType === 'Tahunan' ? 12 : 1))
+      : '-',
+    nextDue: item.endDate || addMonths(parseDateInput(item.startDate) || new Date(), Number(item.duration || 1)).toISOString().slice(0, 10),
     due: item.applicationStatus === 'Approved' ? formatInvoiceDate(item.endDate || item.startDate || new Date()) : 'Menunggu approval',
     status: item.applicationStatus || 'Menunggu Review',
   }));
@@ -696,6 +706,8 @@ function getAdminShortTermTenants() {
   const backendState = JSON.parse(window.localStorage.getItem('onyx-admin-state') || 'null');
   const applications = backendState?.applications || backendState?.data?.applications || [];
   return applications.filter((item) => item.name && ['Harian', 'Mingguan'].includes(item.leaseType)).map((item) => ({
+    id: item.id,
+    raw: item,
     category: 'Short Stay',
     name: item.name,
     room: item.room || '-',
@@ -829,17 +841,31 @@ function getResidentInvoices(resident = getCurrentResident()) {
   const roomCode = getRoomCode(resident.room) || 'ROOM';
   const leaseLabel = resident.leaseType || 'Sewa';
   const startDate = parseDateInput(resident.startDate) || cycle.currentInvoiceDate;
-  const endDate = getResidentLeaseDueDate(resident, startDate);
+  const endDate = parseDateInput(resident.endDate) || getResidentLeaseDueDate(resident, startDate);
   const invoiceDate = startDate;
-  const dueDate = endDate;
+  const dueDate = endDate || new Date();
+  const now = new Date();
+  const daysLeft = endDate ? Math.ceil((endDate - now) / 86400000) : 999;
   const rows = [];
+  // Bulan 1 sudah dibayar saat booking → status Paid
   if (rentAmount > 0) {
     rows.push({
       code: `RENT-${roomCode}-${String(cycle.currentMonthStart.getMonth() + 1).padStart(2, '0')}`,
-      item: `${leaseLabel} ${resident.duration || 1} periode`,
+      item: `${leaseLabel} ${resident.duration || 1} periode (awal)`,
       date: formatInvoiceDate(invoiceDate),
       due: formatInvoiceDate(dueDate),
       amount: rupiah(rentAmount),
+      status: 'Paid',
+    });
+  }
+  // Invoice perpanjangan muncul hanya <= 7 hari ke akhir kontrak
+  if (rentAmount > 0 && endDate && daysLeft <= 7 && daysLeft >= 0) {
+    rows.push({
+      code: `RENT-NEXT-${roomCode}-${String(cycle.currentMonthStart.getMonth() + 1).padStart(2, '0')}`,
+      item: `${leaseLabel} perpanjangan berikutnya`,
+      date: formatInvoiceDate(endDate),
+      due: formatInvoiceDate(addMonths(endDate, 1)),
+      amount: rupiah(rentAmount * (resident.leaseType === 'Tahunan' ? 12 : 1)),
       status: 'Pending',
     });
   }
@@ -863,7 +889,14 @@ function getResidentInvoices(resident = getCurrentResident()) {
       status: resident.administrationStatus === 'Dikonfirmasi Admin' ? 'Recorded' : 'Pending',
     });
   }
-  return rows.length ? rows : [{ code: `APP-${roomCode}`, item: 'Menunggu data tagihan admin', date: formatInvoiceDate(cycle.currentInvoiceDate), due: '-', amount: rupiah(0), status: 'Review' }];
+  return rows.length ? rows : [{
+    code: `NO-BILL-${roomCode}`,
+    item: 'Tidak ada tagihan',
+    date: formatInvoiceDate(startDate),
+    due: '-',
+    amount: '-',
+    status: 'Clear',
+  }];
 }
 
 /**
@@ -1313,13 +1346,15 @@ function renderLoginPage(note = '') {
   return `
     <main class="login-page">
       <section class="login-card">
-        <a class="brand brand--public" href="#" data-route="public" aria-label="Kembali ke halaman publik">
-          <span class="brand__mark"><i class="fa-solid fa-house-chimney-window" aria-hidden="true"></i></span>
-          <span><strong>Onyx</strong><small>Portal</small></span>
-        </a>
-        <div class="login-copy">
-          <p class="kicker">Login</p>
-          <h1>Masuk Portal</h1>
+        <div class="auth-card-head">
+          <a class="brand brand--public" href="#" data-route="public" aria-label="Kembali ke halaman publik">
+            <span class="brand__mark"><i class="fa-solid fa-house-chimney-window" aria-hidden="true"></i></span>
+            <span><strong>Onyx</strong><small>Portal</small></span>
+          </a>
+          <span class="auth-card-divider" aria-hidden="true"></span>
+          <div class="login-copy">
+            <p class="kicker">Login</p>
+          </div>
         </div>
         ${note ? `<p class="login-note">${escapeHtml(note)}</p>` : ''}
         <form class="login-form" id="loginForm">
@@ -1342,13 +1377,15 @@ function renderRegisterPage() {
   return `
     <main class="login-page portal-register-page">
       <section class="login-card">
-        <a class="brand brand--public" href="#" data-route="public" aria-label="Kembali ke halaman publik">
-          <span class="brand__mark"><i class="fa-solid fa-house-chimney-window" aria-hidden="true"></i></span>
-          <span><strong>Onyx</strong><small>Daftar</small></span>
-        </a>
-        <div class="login-copy">
-          <p class="kicker">Register</p>
-          <h1>Buat Akun</h1>
+        <div class="auth-card-head">
+          <a class="brand brand--public" href="#" data-route="public" aria-label="Kembali ke halaman publik">
+            <span class="brand__mark"><i class="fa-solid fa-house-chimney-window" aria-hidden="true"></i></span>
+            <span><strong>Onyx</strong><small>Daftar</small></span>
+          </a>
+          <span class="auth-card-divider" aria-hidden="true"></span>
+          <div class="login-copy">
+            <p class="kicker">Register</p>
+          </div>
         </div>
         <form class="login-form register-form" id="registerForm">
           <label>Full Name<input name="name" autocomplete="name" placeholder="Nama lengkap" required /></label>
@@ -1391,37 +1428,66 @@ function renderResidentPortal() {
   const dueDate = getResidentLeaseDueDate(resident, cycle.currentDue);
   const residentMenu = [
     ['overview', 'fa-chart-pie', 'Overview'],
-    ['billing', 'fa-receipt', 'Billing'],
-    ['utilities', 'fa-bolt', 'Utilities'],
+    ['billing', 'fa-receipt', 'Tagihan'],
+    ['utilities', 'fa-bolt', 'Utilitas'],
     ['access', 'fa-door-closed', 'Access'],
-    ['service', 'fa-screwdriver-wrench', 'Service'],
+    ['service', 'fa-screwdriver-wrench', 'Layanan'],
+    ['chat', 'fa-comments', 'Chat'],
   ];
+  const activeResidentMenu = residentMenu.find(([id]) => id === state.activeResidentSection) || residentMenu[0];
+  const residentTitle = state.activeResidentSection === 'overview' ? `Halo, ${escapeHtml(resident.name || 'Penghuni')}` : activeResidentMenu[2];
+  const residentCaption = {
+    overview: 'Ringkasan kamar dan tagihan',
+    billing: 'Invoice dan status pembayaran',
+    utilities: 'Pemakaian listrik dan air',
+    access: 'Akses kamar dan tamu',
+    service: 'Keluhan dan permintaan layanan',
+  }[state.activeResidentSection] || 'Panel penghuni';
   return `
     <main class="resident-saas">
       <aside class="resident-saas__side">
         <a class="onyx-brand" href="#" data-route="public" aria-label="Onyx Residence homepage"><span>Onyx</span><small>Resident</small></a>
         <nav>
-          ${residentMenu.map(([id, icon, label]) => `<a class="${state.activeResidentSection === id ? 'is-active' : ''}" href="#resident" data-resident-section="${id}"><i class="fa-solid ${icon}" aria-hidden="true"></i>${label}</a>`).join('')}
+          ${residentMenu.map(([id, icon, label]) => `<a class="${state.activeResidentSection === id ? 'is-active' : ''}" href="#resident" data-resident-section="${id}"${state.activeResidentSection === id ? ' aria-current="page"' : ''}><i class="fa-solid ${icon}" aria-hidden="true"></i>${label}</a>`).join('')}
         </nav>
         <button class="resident-logout" type="button" id="residentLogoutButton">Logout</button>
       </aside>
 
       <section class="resident-saas__main">
-        <header class="resident-saas__topbar ${state.activeResidentSection !== 'overview' ? 'resident-saas__topbar--minimal' : ''}">
-          ${state.activeResidentSection === 'overview' ? `<div><span>Resident Portal</span><h1>Welcome, ${escapeHtml(resident.name || 'Penghuni')}</h1></div>` : ''}
-        </header>
-
-        ${state.activeResidentSection === 'overview' ? `<section class="resident-kpis">
-          <article><span>Outstanding Bill</span><strong>${rupiah(outstanding)}</strong><small>Due ${formatInvoiceDate(dueDate)}</small></article>
-          <article><span>Lease Status</span><strong>Active</strong><small>${escapeHtml(resident.room || 'Onyx Signature')}</small></article>
-          <article><span>Electricity</span><strong>${Number(latestUtility.electricKwh || 0)} kWh</strong><small>${escapeHtml(latestUtility.month || 'Belum diset admin')}</small></article>
-          <article><span>Water</span><strong>${Number(latestUtility.waterM3 || 0)} m³</strong><small>${escapeHtml(latestUtility.status || 'Menunggu input admin')}</small></article>
+        ${state.activeResidentSection === 'overview' ? `${renderResidentRenewalChoice(resident)}<section class="resident-kpis">
+          <article><span>Tagihan Aktif</span><strong>${rupiah(outstanding)}</strong><small>Jatuh tempo ${formatInvoiceDate(dueDate)}</small></article>
+          <article><span>Status Sewa</span><strong>Aktif</strong><small>${escapeHtml(resident.room || 'Onyx Signature')}</small></article>
+          <article><span>Listrik</span><strong>${Number(latestUtility.electricKwh || 0)} kWh</strong><small>${escapeHtml(latestUtility.month || 'Belum diset admin')}</small></article>
+          <article><span>Air</span><strong>${Number(latestUtility.waterM3 || 0)} m³</strong><small>${escapeHtml(latestUtility.status || 'Menunggu input admin')}</small></article>
         </section>` : ''}
 
         ${renderResidentSection()}
       </section>
     </main>
   `;
+}
+
+/**
+ * @description Render pilihan lanjut/tidak ngekost di overview penghuni.
+ * @param {object} resident Data penghuni.
+ * @returns {string} Markup renewal choice.
+ */
+function renderResidentRenewalChoice(resident) {
+  const intent = state.residentRenewalIntent;
+  const leaseType = resident.leaseType || 'Bulanan';
+  const rent = Number(resident.monthlyBudget || 0) * (resident.leaseType === 'Tahunan' ? 12 : 1);
+  const endDate = parseDateInput(resident.endDate || resident.end_date || null);
+  const now = new Date();
+  const daysLeft = endDate ? Math.ceil((endDate - now) / 86400000) : 999;
+  const nextDue = endDate || addMonths(new Date(), 1);
+  if (endDate && daysLeft > 7) return ''; // hanya muncul <= 7 hari ke akhir kontrak
+  if (intent === 'continue') {
+    return `<section class="renewal-box renewal-box--continue"><div><span>Perpanjang Sewa</span><h4>Lanjutkan ${escapeHtml(leaseType)} berikutnya</h4><p>Tagihan Rp ${rupiah(rent)} sudah menunggu di menu <b>Tagihan</b> untuk periode ${formatInvoiceDate(nextDue)}.</p></div><a class="button primary" href="#billing" data-resident-section="billing">Lihat Tagihan</a></section>`;
+  }
+  if (intent === 'stop') {
+    return `<section class="renewal-box renewal-box--stop"><div><span>Kontrak Berakhir</span><h4>Tidak melanjutkan sewa</h4><p>Sewa akan berakhir pada ${formatInvoiceDate(nextDue)}. Admin akan menghubungi Anda untuk proses check-out.</p></div><button class="button subtle" type="button" data-renewal-reset="" aria-label="Ubah keputusan">Ubah Keputusan</button></section>`;
+  }
+  return `<section class="renewal-box renewal-box--ask"><div><span>Sewa Berjalan</span><h4>Mau lanjut ${escapeHtml(leaseType)} berikutnya?</h4><p>Sewa Anda akan berakhir ${formatInvoiceDate(nextDue)}. Kalau lanjut, tagihan Rp ${rupiah(rent)} akan muncul di menu Tagihan.</p></div><div class="renewal-box__actions"><button class="button primary" type="button" data-renewal-continue="">Lanjut Ngekost</button><button class="button subtle" type="button" data-renewal-stop="">Tidak Lanjut</button></div></section>`;
 }
 
 function renderResidentPendingPortal(resident) {
@@ -1446,6 +1512,7 @@ function renderResidentSection() {
   if (state.activeResidentSection === 'utilities') return renderResidentUtilities();
   if (state.activeResidentSection === 'access') return renderResidentAccess();
   if (state.activeResidentSection === 'service') return renderResidentService();
+  if (state.activeResidentSection === 'chat') return renderResidentChat();
   return renderResidentOverview();
 }
 
@@ -1492,7 +1559,7 @@ function renderResidentUtilities(compact = false) {
   const electricHeight = Math.min(100, Math.max(8, Number(latest.electricKwh || 0)));
   const waterHeight = Math.min(100, Math.max(8, Number(latest.waterM3 || 0) * 4));
   const amountHeight = Math.min(100, Math.max(8, Number(latest.totalAmount || 0) / 5000));
-  return `<article class="resident-saas-panel ${compact ? 'resident-saas-panel--large' : 'resident-saas-panel--full'}"><div class="resident-panel-title"><div><span>Utilities</span><h2>Listrik & Air</h2></div></div><div class="utility-chart"><div class="utility-chart__bars"><span style="height:${electricHeight}%"><b>${Number(latest.electricKwh || 0)}</b><small>kWh</small></span><span style="height:${waterHeight}%"><b>${Number(latest.waterM3 || 0)}</b><small>m³</small></span><span style="height:${amountHeight}%"><b>${Math.round(Number(latest.totalAmount || 0) / 1000)}k</b><small>Rp</small></span></div><div class="utility-chart__legend"><p><i></i>Electricity · ${Number(latest.electricKwh || 0)} kWh</p><p><i></i>Water · ${Number(latest.waterM3 || 0)} m³</p><p><i></i>Tagihan · ${latest.totalAmount ? rupiah(Number(latest.totalAmount)) : 'Menunggu input admin'}</p></div></div>${compact ? '' : `<div class="utility-history"><div class="resident-panel-title"><div><span>History</span><h2>Riwayat Pemakaian</h2></div></div><div class="resident-saas-table resident-saas-table--utility">${rows.length ? rows.map((item) => `<p><span>${escapeHtml(item.month || '-')}</span><b>${Number(item.electricKwh || 0)} kWh</b><em>${Number(item.waterM3 || 0)} m³</em><i>${rupiah(Number(item.totalAmount || 0))}</i></p>`).join('') : '<p><span>Belum ada data</span><b>0 kWh</b><em>0 m³</em><i>Admin belum input meter kamar ini.</i></p>'}</div></div>`}</article>`;
+  return `<article class="resident-saas-panel ${compact ? 'resident-saas-panel--large' : 'resident-saas-panel--full'}"><div class="resident-panel-title"><div><span>Utilitas</span><h2>Listrik & Air</h2></div></div><div class="utility-chart"><div class="utility-chart__bars"><span style="height:${electricHeight}%"><b>${Number(latest.electricKwh || 0)}</b><small>kWh</small></span><span style="height:${waterHeight}%"><b>${Number(latest.waterM3 || 0)}</b><small>m³</small></span><span style="height:${amountHeight}%"><b>${Math.round(Number(latest.totalAmount || 0) / 1000)}k</b><small>Rp</small></span></div><div class="utility-chart__legend"><p><i></i>Listrik · ${Number(latest.electricKwh || 0)} kWh</p><p><i></i>Air · ${Number(latest.waterM3 || 0)} m³</p><p><i></i>Tagihan · ${latest.totalAmount ? rupiah(Number(latest.totalAmount)) : 'Menunggu input admin'}</p></div></div>${compact ? '' : `<div class="utility-history"><div class="resident-panel-title"><div><span>Riwayat</span><h2>Pemakaian Bulanan</h2></div></div><div class="resident-saas-table resident-saas-table--utility">${rows.length ? rows.map((item) => `<p><span>${escapeHtml(item.month || '-')}</span><b>${Number(item.electricKwh || 0)} kWh</b><em>${Number(item.waterM3 || 0)} m³</em><i>${rupiah(Number(item.totalAmount || 0))}</i></p>`).join('') : '<p><span>Belum ada data</span><b>0 kWh</b><em>0 m³</em><i>Admin belum input meter kamar ini.</i></p>'}</div></div>`}</article>`;
 }
 
 function renderResidentAccess(compact = false) {
@@ -1514,10 +1581,10 @@ function renderResidentAccess(compact = false) {
       : `<article><i class="fa-solid fa-wind" aria-hidden="true"></i><span>Ventilasi</span><strong>Jendela luar</strong><small>Tidak ada perangkat AC/kipas di fasilitas kamar ini.</small></article>`;
 
   if (compact) {
-    return `<article class="resident-saas-panel"><div class="resident-panel-title"><div><span>Access</span><h2>Smart Room</h2></div></div><div class="resident-access-summary"><p><i class="fa-solid ${accessState.locked ? 'fa-lock' : 'fa-lock-open'}" aria-hidden="true"></i><span>Door</span><b>${accessState.locked ? 'Locked' : 'Unlocked'}</b></p><p><i class="fa-solid fa-lightbulb" aria-hidden="true"></i><span>Lampu</span><b>${deviceState.lightOn ? 'On' : 'Off'}</b></p>${climateSummary}</div><a class="resident-panel-link" href="#access" data-resident-section="access">Kelola akses</a></article>`;
+    return `<article class="resident-saas-panel"><div class="resident-panel-title"><div><span>Akses</span><h2>Kontrol Kamar</h2></div></div><div class="resident-access-summary"><p><i class="fa-solid ${accessState.locked ? 'fa-lock' : 'fa-lock-open'}" aria-hidden="true"></i><span>Pintu</span><b>${accessState.locked ? 'Terkunci' : 'Terbuka'}</b></p><p><i class="fa-solid fa-lightbulb" aria-hidden="true"></i><span>Lampu</span><b>${deviceState.lightOn ? 'Nyala' : 'Mati'}</b></p>${climateSummary}</div><a class="resident-panel-link" href="#access" data-resident-section="access">Kelola akses</a></article>`;
   }
 
-  return `<article class="resident-saas-panel resident-saas-panel--full"><div class="resident-panel-title"><div><span>Access</span><h2>Akses & Smart Room</h2></div><button class="onyx-secondary" type="button" id="shareVisitorQr">QR Tamu</button></div><section class="access-control-grid access-control-grid--simple"><div class="access-hero-card access-hero-card--simple"><div class="access-lock-visual ${accessState.locked ? '' : 'is-unlocked'}"><i class="fa-solid ${accessState.locked ? 'fa-lock' : 'fa-lock-open'}" aria-hidden="true"></i></div><div><span>${escapeHtml(resident.room || 'Private Studio')}</span><h3>${accessState.locked ? 'Terkunci' : 'Terbuka'}</h3></div><button class="onyx-cta" type="button" id="toggleSmartLock">${accessState.locked ? 'Unlock' : 'Lock'}</button></div><div class="access-info-stack access-info-stack--simple"><article><span>WiFi</span><strong>ONYX-Resident</strong><button class="row-print-btn" type="button" data-access-action="copy-wifi" data-copy-value="WiFi ONYX-Resident / Password onyx-${new Date().getFullYear()}">Copy</button></article><article><span>QR Tamu</span><strong>${accessState.guestPass}</strong><button class="row-print-btn" type="button" id="openVisitorQr">Show QR</button></article></div></section><section class="smart-room-panel"><div class="resident-panel-title resident-panel-title--flat"><div><span>Smart Control</span><h2>Kontrol sesuai fasilitas kamar</h2></div></div><div class="smart-room-grid"><article><i class="fa-solid fa-lightbulb" aria-hidden="true"></i><span>Lampu Kamar</span><strong>${deviceState.lightOn ? 'Menyala' : 'Mati'}</strong><button class="row-print-btn ${deviceState.lightOn ? 'row-print-btn--gold' : ''}" type="button" data-device-action="toggle-light">${deviceState.lightOn ? 'Matikan' : 'Nyalakan'}</button></article>${climateControl}</div></section><section class="access-log-panel"><div class="resident-panel-title resident-panel-title--flat"><div><span>Log</span><h2>Riwayat akses</h2></div></div><div class="resident-saas-table resident-saas-table--access">${accessLogs.map((log) => `<p><span>${escapeHtml(log.time)}</span><b>${escapeHtml(log.action)}</b><em>${escapeHtml(log.detail)}</em><i>${escapeHtml(log.status)}</i></p>`).join('')}</div></section>${state.isQrModalOpen ? renderVisitorQrModal(accessState) : ''}</article>`;
+  return `<article class="resident-saas-panel resident-saas-panel--full"><div class="resident-panel-title"><div><span>Akses</span><h2>Akses & Kontrol Kamar</h2></div><button class="onyx-secondary" type="button" id="shareVisitorQr">QR Tamu</button></div><section class="access-control-grid access-control-grid--simple"><div class="access-hero-card access-hero-card--simple"><div class="access-lock-visual ${accessState.locked ? '' : 'is-unlocked'}"><i class="fa-solid ${accessState.locked ? 'fa-lock' : 'fa-lock-open'}" aria-hidden="true"></i></div><div><span>${escapeHtml(resident.room || 'Private Studio')}</span><h3>${accessState.locked ? 'Terkunci' : 'Terbuka'}</h3></div><button class="onyx-cta" type="button" id="toggleSmartLock">${accessState.locked ? 'Buka' : 'Kunci'}</button></div><div class="access-info-stack access-info-stack--simple"><article><span>WiFi</span><strong>ONYX-Resident</strong><button class="row-print-btn" type="button" data-access-action="copy-wifi" data-copy-value="WiFi ONYX-Resident / Password onyx-${new Date().getFullYear()}">Salin</button></article><article><span>QR Tamu</span><strong>${accessState.guestPass}</strong><button class="row-print-btn" type="button" id="openVisitorQr">Lihat QR</button></article></div></section><section class="smart-room-panel"><div class="resident-panel-title resident-panel-title--flat"><div><span>Smart Control</span><h2>Kontrol sesuai fasilitas kamar</h2></div></div><div class="smart-room-grid"><article><i class="fa-solid fa-lightbulb" aria-hidden="true"></i><span>Lampu Kamar</span><strong>${deviceState.lightOn ? 'Menyala' : 'Mati'}</strong><button class="row-print-btn ${deviceState.lightOn ? 'row-print-btn--gold' : ''}" type="button" data-device-action="toggle-light">${deviceState.lightOn ? 'Matikan' : 'Nyalakan'}</button></article>${climateControl}</div></section><section class="access-log-panel"><div class="resident-panel-title resident-panel-title--flat"><div><span>Log</span><h2>Riwayat akses</h2></div></div><div class="resident-saas-table resident-saas-table--access">${accessLogs.map((log) => `<p><span>${escapeHtml(log.time)}</span><b>${escapeHtml(log.action)}</b><em>${escapeHtml(log.detail)}</em><i>${escapeHtml(log.status)}</i></p>`).join('')}</div></section>${state.isQrModalOpen ? renderVisitorQrModal(accessState) : ''}</article>`;
 }
 
 function renderVisitorQrModal(accessState) {
@@ -1527,6 +1594,10 @@ function renderVisitorQrModal(accessState) {
 function renderResidentService(compact = false) {
   const tickets = JSON.parse(window.localStorage.getItem('onyx-resident-tickets') || '[]');
   return `<article class="resident-saas-panel ${compact ? '' : 'resident-saas-panel--full'}"><div class="resident-panel-title"><div><span>Service</span><h2>Requests</h2></div>${compact ? '' : '<button class="onyx-secondary" type="button" id="newResidentTicket">New Ticket</button>'}</div><div class="resident-ticket-list">${tickets.length ? tickets.map((ticket) => `<p><span>${escapeHtml(ticket.category)}</span><b>${escapeHtml(ticket.issue)}</b><em>${escapeHtml(ticket.status)}</em></p>`).join('') : '<p><span>Empty</span><b>Belum ada tiket service</b><em>ready</em></p>'}</div>${state.isTicketModalOpen && !compact ? renderTicketModal() : ''}</article>`;
+}
+
+function renderResidentChat() {
+  return `<article class="resident-saas-panel resident-saas-panel--full"><div class="resident-panel-title"><div><span>Grup Chat</span><h2>Diskusi Penghuni & Admin</h2></div></div><div class="group-chat-box" id="groupChatBox"><div class="group-chat-messages" id="groupChatMessages"><p class="chat-placeholder">Memuat percakapan...</p></div><form class="group-chat-form" id="groupChatForm"><input name="message" type="text" placeholder="Ketik pesan..." autocomplete="off" maxlength="2000" required /><button class="button primary" type="submit" id="groupChatSend">Kirim</button></form></div></article>`;
 }
 
 function renderTicketModal() {
@@ -1546,7 +1617,6 @@ function renderResidentPrintableReceipt() {
  */
 function renderAdminApp() {
   syncAdminState(false);
-  const occupancy = getRoomOccupancyStats();
   const activeMenu = adminMenu.find((item) => item.id === state.activeAdminSection) || adminMenu[0];
   return `
     <a class="skip-link" href="#adminMain">Lewati ke konten utama</a>
@@ -1562,7 +1632,6 @@ function renderAdminApp() {
           </a>
         `).join('')}
       </nav>
-      <div class="side-summary"><span>Occupancy</span><strong>${occupancy.occupancyPercent}%</strong><small>${occupancy.occupiedRooms} / ${occupancy.totalRooms} kamar terisi</small><div><i style="width:${occupancy.occupancyPercent}%"></i></div></div>
       <button class="resident-logout admin-logout" type="button" id="logoutButton"><i class="fa-solid fa-right-from-bracket" aria-hidden="true"></i> Logout</button>
     </aside>
 
@@ -1606,6 +1675,7 @@ function renderAdminSection() {
   if (state.activeAdminSection === 'utilities') return renderAdminUtilitiesPanel();
   if (state.activeAdminSection === 'layanan') return renderAdminLayananPanel();
   if (state.activeAdminSection === 'laporan') return renderCashflowPanel();
+  if (state.activeAdminSection === 'chat') return renderAdminChatPanel();
   return renderDashboard();
 }
 
@@ -1614,50 +1684,93 @@ function renderAdminSection() {
  * @returns {string} Markup dashboard.
  */
 function renderDashboard() {
-  const { resident, proofs } = getAdminApplicationState();
+  const { proofs } = getAdminApplicationState();
   const backendState = JSON.parse(window.localStorage.getItem('onyx-admin-state') || 'null');
   const applications = backendState?.applications || backendState?.data?.applications || [];
   const utilityMeters = backendState?.utility_meters || backendState?.data?.utility_meters || [];
-  const telemetryRows = getIotTelemetryRows();
-  const serviceTickets = getAdminServiceTickets();
   const paymentBuyers = getAdminPaymentBuyers();
-  const pendingPayment = proofs.filter((item) => item.status === 'uploaded').length;
-  const applicantCount = applications.length;
+  const residentsRows = [...getAdminResidents(), ...getAdminShortTermTenants()];
   const { occupiedRooms, availableRooms, totalRooms, occupancyPercent } = getRoomOccupancyStats();
-  const activeTickets = serviceTickets.filter((item) => !/done|closed|selesai/i.test(item.status || '')).length;
-  const urgentTickets = serviceTickets.filter((item) => /urgent|high|tinggi/i.test(item.priority || '') && !/done|closed|selesai/i.test(item.status || '')).length;
-  const unpaidBuyers = paymentBuyers.filter((item) => /belum bayar/i.test(item.paymentStatus || '')).length;
-  const rejectedPayments = paymentBuyers.filter((item) => /ditolak/i.test(item.paymentStatus || '')).length;
-  const roomsWithTelemetry = new Set(telemetryRows.map((item) => item.roomCode).filter(Boolean));
-  const roomsWithoutTelemetry = getRooms().filter((room) => !roomsWithTelemetry.has(room.no));
+  const approvedRoomCodes = new Set(getApprovedApplications().map((item) => getRoomCode(item.room)).filter(Boolean));
   const roomsWithMeter = new Set(utilityMeters.map((item) => getRoomCode(item.room)).filter(Boolean));
+  const pendingProofRows = proofs.filter((item) => item.status === 'uploaded');
+  const unpaidRows = paymentBuyers.filter((item) => /belum bayar|menunggu review|ditolak/i.test(item.paymentStatus || ''));
+  const paidRows = paymentBuyers.filter((item) => /sudah bayar/i.test(item.paymentStatus || ''));
+  const now = new Date();
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const rowMonthKey = (item) => String(item.created_at || item.createdAt || item.startDate || item.endDate || '').slice(0, 7);
+  const revenueThisMonth = paidRows
+    .filter((item) => rowMonthKey(item.proof || item) === currentMonthKey || rowMonthKey(item) === currentMonthKey)
+    .reduce((sum, item) => sum + Number(item.totalPayment || 0), 0);
+  const unpaidTotal = unpaidRows.reduce((sum, item) => sum + Number(item.totalPayment || 0), 0);
+  const monthLabels = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+    return {
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+      label: date.toLocaleDateString('id-ID', { month: 'short' }),
+    };
+  });
+  const revenueSeries = monthLabels.map((month) => ({
+    ...month,
+    total: paidRows
+      .filter((item) => rowMonthKey(item.proof || item) === month.key || rowMonthKey(item) === month.key)
+      .reduce((sum, item) => sum + Number(item.totalPayment || 0), 0),
+  }));
+  const maxRevenue = Math.max(...revenueSeries.map((item) => item.total), 1);
+  const revenueBars = revenueSeries.map((item) => `<div class="dashboard-revenue-bar"><span style="height:${Math.max(8, Math.round((item.total / maxRevenue) * 100))}%"></span><small>${escapeHtml(item.label)}</small><em>${item.total ? rupiah(item.total).replace('Rp ', '') : '0'}</em></div>`).join('');
+  const typeStats = Object.values(getRooms().reduce((acc, room) => {
+    const key = room.type || 'Kamar';
+    if (!acc[key]) acc[key] = { type: key, total: 0, occupied: 0 };
+    acc[key].total += 1;
+    if (approvedRoomCodes.has(room.no)) acc[key].occupied += 1;
+    return acc;
+  }, {}));
+  const typeBreakdown = typeStats.map((item) => {
+    const percent = item.total ? Math.round((item.occupied / item.total) * 100) : 0;
+    return `<p><span>${escapeHtml(item.type)}</span><strong>${item.occupied}/${item.total}</strong><i><b style="width:${percent}%"></b></i></p>`;
+  }).join('') || '<p><span>Kamar</span><strong>0/0</strong><i><b style="width:0%"></b></i></p>';
+  const expiringContracts = applications.filter((item) => {
+    if (item.applicationStatus !== 'Approved') return false;
+    const endDate = parseDateInput(item.endDate);
+    if (!endDate) return false;
+    const daysLeft = Math.ceil((endDate - now) / 86400000);
+    return daysLeft >= 0 && daysLeft <= 30;
+  });
   const roomsWithoutMeter = getRooms().filter((room) => !roomsWithMeter.has(room.no));
-  const approvedRoomCodes = new Set(getApprovedApplications().map((item) => getRoomCode(item.room)));
-  const availableRoomRows = getRooms().filter((room) => !approvedRoomCodes.has(room.no));
-  const revenueAtRisk = availableRoomRows.reduce((sum, room) => sum + Number(room.price || 0), 0);
-  const newestApplicants = paymentBuyers.filter((item) => !/sudah bayar/i.test(item.paymentStatus || ''));
-  const newestApplicant = newestApplicants[0] || paymentBuyers[0] || resident || null;
-  const activeTicketRows = serviceTickets.filter((item) => !/done|closed|selesai/i.test(item.status || ''));
-  const oldestTicket = [...activeTicketRows].sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0))[0] || null;
-  const topAvailableRooms = availableRoomRows.slice(0, 3).map((room) => room.no).join(', ');
-  const missingBillingCount = Math.max(roomsWithoutMeter.length, unpaidBuyers + rejectedPayments);
-   return `
-      <section class="admin-ops-strip" id="dashboard" data-section aria-label="Ringkasan operasional">
-        <dl class="admin-ops-strip__item"><dt>Review Pembayaran</dt><dd><strong>${pendingPayment}</strong><small>${rejectedPayments ? `${rejectedPayments} bukti ditolak` : 'Approve / tolak bukti baru'}</small></dd></dl>
-        <dl class="admin-ops-strip__item"><dt>Pendaftar Baru</dt><dd><strong>${newestApplicants.length}</strong><small>${newestApplicant?.name ? escapeHtml(newestApplicant.name) : 'Belum ada lead baru'}</small></dd></dl>
-        <dl class="admin-ops-strip__item"><dt>Tiket Belum Selesai</dt><dd><strong>${activeTickets}</strong><small>${urgentTickets} prioritas tinggi</small></dd></dl>
-        <dl class="admin-ops-strip__item"><dt>Kamar Kosong</dt><dd><strong>${availableRooms}</strong><small>${topAvailableRooms || 'Semua kamar terisi'}</small></dd></dl>
-        <dl class="admin-ops-strip__item"><dt>Revenue Hilang</dt><dd><strong>${rupiah(revenueAtRisk)}</strong><small>Potensi sewa / bulan</small></dd></dl>
-        <dl class="admin-ops-strip__item"><dt>Tagihan Belum Lengkap</dt><dd><strong>${missingBillingCount}</strong><small>${roomsWithoutMeter.length} meter belum masuk</small></dd></dl>
-      </section>
+  const actionItems = [
+    { icon: 'fa-receipt', text: `${pendingProofRows.length} bukti bayar perlu review`, cta: 'Review', href: routePath('/admin/pembayaran'), section: 'pembayaran', active: pendingProofRows.length > 0 },
+    { icon: 'fa-file-signature', text: `${expiringContracts.length} kontrak hampir habis`, cta: 'Lihat', href: routePath('/admin/penghuni'), section: 'penghuni', active: expiringContracts.length > 0 },
+    { icon: 'fa-gauge-high', text: `${roomsWithoutMeter.length} kamar belum ada meter`, cta: 'Atur', href: routePath('/admin/utilities'), section: 'utilities', active: roomsWithoutMeter.length > 0 },
+  ].map((item) => `<a class="dashboard-action-item ${item.active ? 'is-active' : ''}" href="${item.href}" data-admin-section="${item.section}"><span><i class="fa-solid ${item.icon}" aria-hidden="true"></i>${escapeHtml(item.text)}</span><b>${escapeHtml(item.cta)} <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></b></a>`).join('');
+  const newestResidents = residentsRows.slice(0, 5).map((item) => `<p><span><strong>${escapeHtml(item.name || '-')}</strong><small>${escapeHtml(getRoomCode(item.room || '') || '-')} · ${escapeHtml(item.plan || '-')}</small></span><em class="${slug(item.status || '')}">${escapeHtml(item.status || '-')}</em></p>`).join('') || '<p><span><strong>Belum ada penghuni</strong><small>Data akan muncul setelah pendaftaran</small></span><em>-</em></p>';
+  const transactionSource = proofs.length ? proofs : paymentBuyers.map((item) => ({ ...item, status: item.proofStatus, amount: item.totalPayment, application_id: item.id }));
+  const latestTransactions = transactionSource.slice(-5).reverse().map((item) => {
+    const linked = paymentBuyers.find((buyer) => buyer.id === item.application_id) || item;
+    const amount = Number(item.amount || item.totalPayment || linked.totalPayment || 0);
+    const status = item.status === 'uploaded' ? 'Review' : item.status === 'approved' ? 'Paid' : item.paymentStatus || item.status || 'Pending';
+    return `<p><span><strong>${escapeHtml(linked.name || 'Transaksi')}</strong><small>${escapeHtml(getRoomCode(linked.room || '') || '-')} · ${escapeHtml(status)}</small></span><b>${amount ? rupiah(amount) : '-'}</b></p>`;
+  }).join('') || '<p><span><strong>Belum ada transaksi</strong><small>Menunggu pembayaran masuk</small></span><b>-</b></p>';
 
-     <section class="split-grid admin-dashboard-main">
-      <article class="panel chart-card dashboard-card dashboard-card--data"><div class="panel-head"><div><span>Uang & Lead</span><h3>Yang paling berpengaruh ke pemasukan</h3></div><a class="text-btn" href="${routePath('/admin/pembayaran')}" data-admin-section="pembayaran">Buka Pembayaran</a></div><div class="admin-action-list"><p><span>Bayar</span><b>${pendingPayment ? `${pendingPayment} bukti perlu review` : 'Pembayaran aman'}</b><em>${pendingPayment ? 'Review di menu Pembayaran.' : 'Tidak ada antrian.'}</em></p><p><span>Lead</span><b>${newestApplicants.length ? `${newestApplicants.length} calon penghuni perlu follow-up` : 'Tidak ada lead tertahan'}</b><em>${newestApplicant?.name ? `${escapeHtml(newestApplicant.name)} · ${escapeHtml(newestApplicant.paymentStatus || newestApplicant.applicationStatus || 'Review')}` : 'Menunggu pendaftaran baru.'}</em></p><p><span>Revenue</span><b>${rupiah(revenueAtRisk)} belum masuk</b><em>${availableRooms ? `${availableRooms} kamar kosong; prioritas ${escapeHtml(topAvailableRooms || '-')}.` : `${occupancyPercent}% occupancy; semua kamar terisi.`}</em></p></div></article>
-      <article class="panel table-card dashboard-card dashboard-card--queue"><div class="panel-head"><div><span>Operasional</span><h3>Risiko layanan dan billing</h3></div><a class="text-btn" href="${routePath('/admin/layanan')}" data-admin-section="layanan">Buka Layanan</a></div><div class="admin-action-list"><p><span>Tiket</span><b>${oldestTicket ? `${escapeHtml(oldestTicket.category || 'Service')} belum selesai` : 'Tidak ada tiket aktif'}</b><em>${oldestTicket ? `${escapeHtml(oldestTicket.issue || 'Perlu tindak lanjut')} · ${escapeHtml(oldestTicket.status || 'open')}` : 'Semua layanan sudah clear.'}</em></p><p><span>Meter</span><b>${roomsWithoutMeter.length} kamar belum ada meter</b><em>${roomsWithoutMeter.slice(0, 3).map((room) => escapeHtml(room.no)).join(', ') || 'Meter utilitas sudah tercatat.'}</em></p><p><span>Monitoring</span><b>${roomsWithoutTelemetry.length} kamar belum update</b><em>${roomsWithoutTelemetry.slice(0, 3).map((room) => escapeHtml(room.no)).join(', ') || 'Semua kamar punya telemetry.'}</em></p></div></article>
+  return `
+    <section class="hotel-dashboard" id="dashboard" data-section aria-label="Dashboard operasional hotel">
+      <div class="hotel-dashboard-kpis">
+        <article><span>Pendapatan Bulan Ini</span><strong>${rupiah(revenueThisMonth)}</strong><small>${paidRows.length} transaksi lunas</small></article>
+        <article><span>Belum Dibayar</span><strong>${unpaidRows.length}</strong><small>${rupiah(unpaidTotal)}</small></article>
+        <article><span>Kamar Terisi</span><strong>${occupiedRooms}</strong><small>${occupancyPercent}% dari ${totalRooms} kamar</small></article>
+        <article><span>Kamar Kosong</span><strong>${availableRooms}</strong><small>Siap ditawarkan</small></article>
+      </div>
+      <div class="hotel-dashboard-grid hotel-dashboard-grid--top">
+        <article class="panel hotel-dashboard-card hotel-dashboard-card--chart"><div class="panel-head"><div><span>Chart Pendapatan</span><h3>6 bulan terakhir</h3></div><a class="text-btn" href="${routePath('/admin/laporan')}" data-admin-section="laporan">Laporan</a></div><div class="dashboard-revenue-chart">${revenueBars}</div></article>
+        <article class="panel hotel-dashboard-card hotel-dashboard-card--occupancy"><div class="panel-head"><div><span>Occupancy Rate</span><h3>${occupancyPercent}% terisi</h3></div><small>${occupiedRooms}/${totalRooms} kamar</small></div><div class="dashboard-occupancy-ring" style="--value:${occupancyPercent}"><strong>${occupancyPercent}%</strong><small>Occupancy</small></div><div class="dashboard-type-breakdown">${typeBreakdown}</div></article>
+      </div>
+      <article class="panel hotel-dashboard-card hotel-dashboard-actions"><div class="panel-head"><div><span>Action Items</span><h3>Butuh tindakan sekarang</h3></div></div><div class="dashboard-action-list">${actionItems}</div></article>
+      <div class="hotel-dashboard-grid hotel-dashboard-grid--bottom">
+        <article class="panel hotel-dashboard-card"><div class="panel-head"><div><span>Penghuni Terbaru</span><h3>5 data terakhir</h3></div><a class="text-btn" href="${routePath('/admin/penghuni')}" data-admin-section="penghuni">Lihat semua</a></div><div class="dashboard-compact-list">${newestResidents}</div></article>
+        <article class="panel hotel-dashboard-card"><div class="panel-head"><div><span>Transaksi Terbaru</span><h3>5 aktivitas terakhir</h3></div><a class="text-btn" href="${routePath('/admin/pembayaran')}" data-admin-section="pembayaran">Review</a></div><div class="dashboard-compact-list dashboard-compact-list--money">${latestTransactions}</div></article>
+      </div>
     </section>
   `;
 }
-
 function renderAdminUtilitiesPanel() {
   const meters = getUtilityMeters();
   const telemetryRows = getIotTelemetryRows();
@@ -1672,7 +1785,7 @@ function renderAdminUtilitiesPanel() {
 
     <div class="resident-ops-kpis utilities-kpis"><article><span>Meter</span><strong>${meters.length}</strong><small>Data tercatat</small></article><article><span>Total Tagihan</span><strong>${rupiah(totalCharges)}</strong><small>Utilitas</small></article><article><span>IoT</span><strong>${telemetryRows.length}</strong><small>Kamar terpantau</small></article><article><span>Total Kamar</span><strong>${getRooms().length}</strong><small>Inventory</small></article></div>
     <div class="admin-block utilities-card">
-      <div class="admin-block__head"><h4>Meter Utilitas</h4><button class="admin-ghost-btn admin-ghost-btn--gold no-print" type="button" data-admin-open-room-feature="meter" aria-label="Catat meter utilitas">Catat Meter</button></div>
+      <div class="admin-block__head"><h4>Meter Utilitas</h4><button class="admin-ghost-btn admin-ghost-btn--gold no-print" type="button" id="openUtilityMeterModal" aria-label="Catat meter utilitas">Catat Meter</button></div>
       <div class="admin-data">
         <div class="admin-data__head no-print"><span>Penghuni</span><span>Listrik</span><span>Air</span><span>Tagihan</span></div>
         ${meterRows || '<div class="admin-data__empty"><strong>Belum ada meter</strong><p>Buka Kamar → Detail → Meter &amp; Tagihan untuk mencatat.</p></div>'}
@@ -1685,7 +1798,7 @@ function renderAdminUtilitiesPanel() {
         ${iotRows}
       </div>
     </div>
-  </section>`;
+  </section>${renderAdminUtilityMeterModal()}`;
 }
 
 function renderAdminLayananPanel() {
@@ -1708,7 +1821,7 @@ function renderAdminLayananPanel() {
   return `<section class="admin-page-panel admin-stack" id="layanan" data-section>
     <div class="admin-split admin-split--layanan">
       <div class="admin-block layanan-card">
-        <div class="admin-block__head layanan-card__head"><div><span>Smart Access</span><h4>Kontrol akses kamar</h4></div><button class="admin-ghost-btn admin-ghost-btn--gold no-print" type="button" id="adminToggleSmartLock" aria-pressed="${accessState.locked}" aria-label="${accessState.locked ? 'Buka kunci kamar' : 'Kunci kamar'}">${accessState.locked ? 'Unlock' : 'Lock'}</button></div>
+        <div class="admin-block__head layanan-card__head"><div><span>Smart Access</span><h4>Kontrol akses kamar</h4></div><button class="admin-ghost-btn admin-ghost-btn--gold no-print" type="button" id="adminToggleSmartLock" aria-pressed="${accessState.locked}" aria-label="${accessState.locked ? 'Buka kunci kamar' : 'Kunci kamar'}">${accessState.locked ? 'Buka' : 'Kunci'}</button></div>
         <div class="layanan-card__stats"><dl><dt>Door</dt><dd>${accessState.locked ? 'Locked' : 'Open'}</dd></dl><dl><dt>QR Tamu</dt><dd>${escapeHtml(accessState.guestPass)}</dd></dl><dl><dt>Valid</dt><dd>${escapeHtml(accessState.validUntil)}</dd></dl></div>
         <div class="admin-list">${logRows || '<p><span>—</span><b>Belum ada log akses</b><i>ready</i></p>'}</div>
         <div class="admin-actions no-print"><button class="admin-ghost-btn" type="button" data-copy-value="${escapeHtml(accessState.guestPass)}" data-access-action="copy-qr">Copy QR</button><button class="admin-ghost-btn" type="button" data-copy-value="ONYX-${escapeHtml(roomCode)} / onyx-${escapeHtml(roomCode).toLowerCase()}-wifi" data-access-action="copy-wifi">Share WiFi</button></div>
@@ -1760,10 +1873,11 @@ function renderRoomsPanel() {
     const haystack = `${room.no} ${room.name}`.toLowerCase();
     return haystack.includes(state.roomQuery.toLowerCase()) && (!state.roomType || room.type === state.roomType) && (!state.roomStatus || getEffectiveRoomStatus(room) === state.roomStatus);
   });
+  const occupancy = getRoomOccupancyStats();
 
   return `
     <section class="admin-flat-panel" id="kamar" data-section>
-      <div class="inventory-head"><div class="inventory-actions no-print"><button class="button success" type="button" id="openRoomCreate"><i class="fa-solid fa-plus" aria-hidden="true"></i>Tambah kamar</button><button class="button subtle" type="button" id="printRooms"><i class="fa-solid fa-print" aria-hidden="true"></i>Cetak</button></div></div>
+      <div class="room-management-head no-print"><div><h2>Kamar</h2><small>${filteredRooms.length} data tampil</small></div><div class="room-management-actions"><button class="room-action-primary" type="button" id="openRoomCreate"><i class="fa-solid fa-plus" aria-hidden="true"></i><span>Tambah kamar</span></button><button class="room-action-secondary" type="button" id="printRooms" aria-label="Cetak laporan kamar"><i class="fa-solid fa-print" aria-hidden="true"></i><span>Cetak</span></button></div></div>
       <div class="inventory-toolbar no-print"><label class="inventory-search" for="adminRoomSearchProxy"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input form="roomForm" id="adminRoomSearchProxy" type="search" value="${escapeHtml(state.roomQuery)}" placeholder="Cari nomor / nama kamar" /></label><select class="field" id="typeFilter" aria-label="Filter tipe kamar">${['', 'Standard', 'Deluxe', 'Suite', 'VIP'].map((type) => `<option value="${type}" ${state.roomType === type ? 'selected' : ''}>${type || 'Semua tipe'}</option>`).join('')}</select><select class="field" id="statusFilter" aria-label="Filter status kamar">${['', 'tersedia', 'terisi', 'maintenance'].map((status) => `<option value="${status}" ${state.roomStatus === status ? 'selected' : ''}>${status || 'Semua status'}</option>`).join('')}</select></div>
       <div class="room-list"><div class="room-list-head no-print"><span>Kamar</span><span>Detail</span><span>Harga</span><span>Status</span><span>Aksi</span></div>${filteredRooms.map(renderRoomRow).join('') || '<p class="empty">Tidak ada kamar yang cocok.</p>'}</div>
       ${renderRoomsPrintReport(filteredRooms)}
@@ -1772,8 +1886,8 @@ function renderRoomsPanel() {
 }
 
 function renderRoomsPrintReport(rooms) {
-  const occupancy = getRoomOccupancyStats();
   const generatedAt = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+  const occupancy = getRoomOccupancyStats();
   const rows = rooms.map((room) => {
     const occupant = getRoomOccupant(room.no);
     const status = getEffectiveRoomStatus(room);
@@ -1811,6 +1925,17 @@ function renderRoomEditorForm(room = null) {
 function renderRoomUtilityForm(room, occupant = null) {
   const month = new Date().toISOString().slice(0, 7);
   return `<form class="room-utility-form no-print" id="roomUtilityMeterForm"><div><span>Input Meter</span><h4>Catat listrik, air, dan tagihan</h4><p>Data masuk ke billing penghuni dan histori meter kamar ini.</p></div><input type="hidden" name="application_id" value="${escapeHtml(occupant?.id || '')}" /><input type="hidden" name="room" value="${escapeHtml(room.no)}" /><input type="hidden" name="residentName" value="${escapeHtml(occupant?.name || '')}" /><label>Bulan<input name="month" type="month" value="${month}" required /></label><label>Listrik kWh<input name="electricKwh" type="number" min="0" step="0.1" placeholder="0" required /></label><label>Air m³<input name="waterM3" type="number" min="0" step="0.1" placeholder="0" required /></label><label>Tarif listrik/kWh<input name="electricRate" type="number" min="0" value="1500" required /></label><label>Tarif air/m³<input name="waterRate" type="number" min="0" value="8000" required /></label><label>Biaya tetap<input name="fixedFee" type="number" min="0" value="0" /></label><button class="button primary" type="submit">Simpan Meter</button></form>`;
+}
+
+function renderAdminUtilityMeterModal() {
+  if (!state.isUtilityMeterModalOpen) return '';
+  const month = new Date().toISOString().slice(0, 7);
+  const candidates = getAdminResidentCandidates();
+  const fallbackRoom = getRooms()[0] || {};
+  const options = candidates.length
+    ? candidates.map((item) => `<option value="${escapeHtml(item.id || '')}" data-name="${escapeHtml(item.name || '')}" data-room="${escapeHtml(getRoomCode(item.room || item.kamar || '') || fallbackRoom.no || '')}">${escapeHtml(item.name || 'Penghuni')} · ${escapeHtml(getRoomCode(item.room || item.kamar || '') || '-')}</option>`).join('')
+    : `<option value="APP-DEMO-RESIDENT" data-name="Demo Resident" data-room="${escapeHtml(fallbackRoom.no || '')}">Demo Resident · ${escapeHtml(fallbackRoom.no || '-')}</option>`;
+  return `<div class="utility-meter-modal no-print" role="dialog" aria-modal="true" aria-labelledby="utilityMeterModalTitle"><form class="utility-meter-modal__card" id="roomUtilityMeterForm"><div class="utility-meter-modal__head"><div><span>Meter Utilitas</span><h3 id="utilityMeterModalTitle">Catat meter</h3><p>Input listrik, air, dan tarif langsung dari halaman Utilitas.</p></div><button class="row-print-btn" type="button" id="closeUtilityMeterModal">Tutup</button></div><label>Penghuni<select name="application_id" required>${options}</select></label><label>Bulan<input name="month" type="month" value="${month}" required /></label><label>Listrik kWh<input name="electricKwh" type="number" min="0" step="0.1" placeholder="0" required /></label><label>Air m3<input name="waterM3" type="number" min="0" step="0.1" placeholder="0" required /></label><label>Tarif listrik/kWh<input name="electricRate" type="number" min="0" value="1500" required /></label><label>Tarif air/m3<input name="waterRate" type="number" min="0" value="8000" required /></label><label>Biaya tetap<input name="fixedFee" type="number" min="0" value="0" /></label><div class="form-actions full"><button class="button subtle" type="button" id="cancelUtilityMeterModal">Batal</button><button class="button primary" type="submit">Simpan Meter</button></div></form></div>`;
 }
 
 function renderRoomDetailPanel(room) {
@@ -1853,19 +1978,39 @@ function renderGuestsPanel() {
 function renderResidentsAdminPanel() {
   const rows = [...getAdminResidents(), ...getAdminShortTermTenants()];
   if (state.adminDetailType === 'penghuni') return renderAdminPersonDetail('penghuni', rows[state.adminDetailIndex] || rows[0]);
-  const activeRows = rows.filter((resident) => ['aktif', 'confirmed', 'check-in'].includes(String(resident.status || '').toLowerCase())).length;
-  const longStayRows = rows.filter((resident) => (resident.category || 'Long Stay') === 'Long Stay').length;
-  const shortStayRows = rows.length - longStayRows;
-  const totalBilling = rows.reduce((sum, resident) => sum + Number(String(resident.billing || resident.total || '').replace(/[^0-9]/g, '') || 0), 0);
-  const rowMarkup = rows.map((resident, index) => {
+  const residentQuery = state.residentQuery.trim().toLowerCase();
+  const visibleRows = rows.map((resident, index) => ({ resident, index })).filter(({ resident }) => {
+    if (!residentQuery) return true;
+    const raw = resident.raw || {};
+    const haystack = `${resident.name || ''} ${resident.room || ''} ${resident.plan || ''} ${resident.status || ''} ${raw.phone || ''} ${raw.email || ''} ${raw.nik || ''}`.toLowerCase();
+    return haystack.includes(residentQuery);
+  });
+  const activeRows = visibleRows.filter(({ resident }) => ['Approved', 'aktif', 'confirmed', 'check-in'].includes(String(resident.status || ''))).length;
+  const longStayRows = visibleRows.filter(({ resident }) => (resident.category || 'Long Stay') === 'Long Stay').length;
+  const shortStayRows = visibleRows.length - longStayRows;
+  const totalBilling = visibleRows.reduce((sum, { resident }) => sum + Number(String(resident.billing || resident.total || '').replace(/[^0-9]/g, '') || 0), 0);
+  const rowMarkup = visibleRows.map(({ resident, index }) => {
     const category = resident.category || 'Resident';
     const period = resident.period || resident.stay || '-';
-    const amount = resident.billing || resident.total || '-';
-    const initials = String(resident.name || 'R').split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase();
-    return `<button class="admin-person-row admin-person-row--hotel" type="button" data-admin-detail="penghuni" data-admin-detail-index="${index}"><span class="resident-avatar">${escapeHtml(initials)}</span><div class="resident-guest"><span>${escapeHtml(resident.room || '-')}</span><strong>${escapeHtml(resident.name || '-')}</strong><small>${escapeHtml(resident.plan || '-')} · ${escapeHtml(period)}</small></div><div class="resident-stay"><span>Tipe sewa</span><strong>${escapeHtml(category)}</strong><small>${escapeHtml(resident.due || resident.end || 'Jadwal belum diisi')}</small></div><div class="resident-billing"><span>Tagihan</span><strong>${escapeHtml(amount)}</strong><small>${escapeHtml(resident.refund || resident.administrationStatus || 'Administrasi standar')}</small></div><i class="tenant-type-label ${slug(category)}">${escapeHtml(category)}</i><em class="resident-status-chip ${slug(resident.status || '')}">${escapeHtml(resident.status || '-')}</em></button>`;
+    const nextAmount = resident.nextBilling || resident.billing || resident.total || '-';
+    const nextDue = resident.nextDue || resident.due || resident.end || '';
+    const status = resident.status || '-';
+    const billingLabel = resident.status === 'Approved' ? `Periode ${formatInvoiceDate(nextDue)}` : 'Menunggu approval';
+    const actionMarkup = `<div class="resident-row-actions"><button class="resident-detail-btn" type="button" data-admin-detail="penghuni" data-admin-detail-index="${index}">Detail</button><button class="resident-delete-btn" type="button" data-resident-delete="${escapeHtml(resident.id || '')}" data-resident-name="${escapeHtml(resident.name || '-')}" data-resident-index="${index}"><i class="fa-solid fa-trash" aria-hidden="true"></i><span>Hapus</span></button></div>`;
+    return `<article class="admin-person-row admin-person-row--hotel"><button class="admin-person-row__main" type="button" data-admin-detail="penghuni" data-admin-detail-index="${index}"><div class="resident-guest"><span>${escapeHtml(resident.room || '-')}</span><strong>${escapeHtml(resident.name || '-')}</strong><small>${escapeHtml(resident.plan || '-')} · ${escapeHtml(period)}</small></div><div class="resident-stay"><span>Tipe sewa</span><strong>${escapeHtml(category)}</strong><small>${escapeHtml(resident.due || resident.end || 'Jadwal belum diisi')}</small></div><div class="resident-billing"><span>Tagihan</span><strong>${escapeHtml(nextAmount)}</strong><small>${escapeHtml(billingLabel)}</small></div><i class="tenant-type-label ${slug(category)}">${escapeHtml(category)}</i><em class="resident-status-chip ${slug(status)}">${escapeHtml(status)}</em></button>${actionMarkup}</article>`;
   }).join('');
+  return `<section class="admin-page-panel admin-resident-ops" id="penghuni" data-section><div class="resident-ops-kpis"><article><span>Total</span><strong>${visibleRows.length}</strong><small>${rows.length} data tersedia</small></article><article><span>Aktif</span><strong>${activeRows}</strong><small>Status berjalan</small></article><article><span>Long stay</span><strong>${longStayRows}</strong><small>Bulanan atau tahunan</small></article><article><span>Short stay</span><strong>${shortStayRows}</strong><small>Harian atau mingguan</small></article><article class="resident-billing-kpi"><span>Billing</span><strong>${totalBilling ? rupiah(totalBilling) : 'Rp 0'}</strong><small>Estimasi tagihan tampil</small></article></div><div class="resident-ops-toolbar no-print"><label class="resident-search" for="adminResidentSearch"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input id="adminResidentSearch" type="search" value="${escapeHtml(state.residentQuery)}" placeholder="Cari nama penghuni, kamar, telepon, email, NIK" /></label><span>${visibleRows.length} hasil</span></div><div class="resident-ops-table"><div class="resident-ops-table__head no-print"><div class="resident-ops-table__head-main"><span>Penghuni</span><span>Sewa</span><span>Tagihan</span><span>Tipe</span><span>Status</span></div><span class="resident-ops-table__head-actions" aria-hidden="true"></span></div>${rowMarkup || '<div class="empty admin-empty-state"><strong>Data tidak ditemukan.</strong><p>Coba kata kunci nama, kamar, telepon, email, atau NIK lain.</p></div>'}</div></section>${renderResidentDeleteModal()}`;
+}
 
-  return `<section class="admin-page-panel admin-resident-ops" id="penghuni" data-section><div class="resident-ops-kpis"><article><span>Total</span><strong>${rows.length}</strong><small>Penghuni dan penyewa</small></article><article><span>Aktif</span><strong>${activeRows}</strong><small>Status berjalan</small></article><article><span>Long stay</span><strong>${longStayRows}</strong><small>Bulanan atau tahunan</small></article><article><span>Short stay</span><strong>${shortStayRows}</strong><small>Harian atau mingguan</small></article><article><span>Billing</span><strong>${totalBilling ? rupiah(totalBilling) : 'Rp 0'}</strong><small>Estimasi tagihan</small></article></div><div class="resident-ops-table"><div class="resident-ops-table__head no-print"><span>Penghuni</span><span>Sewa</span><span>Tagihan</span><span>Tipe</span><span>Status</span></div>${rowMarkup || '<div class="empty admin-empty-state"><strong>Belum ada penghuni atau penyewa real.</strong><p>Data muncul setelah user daftar dan disetujui admin.</p></div>'}</div></section>`;
+function renderResidentDeleteModal() {
+  const target = state.residentDeleteTarget;
+  if (!target) return '';
+  const name = target.name || 'penghuni';
+  return `<div class="resident-delete-modal" role="dialog" aria-modal="true" aria-labelledby="residentDeleteTitle"><div class="resident-delete-modal__card"><div class="resident-delete-modal__icon"><i class="fa-solid fa-trash" aria-hidden="true"></i></div><div><span>Konfirmasi hapus</span><h3 id="residentDeleteTitle">Hapus ${escapeHtml(name)}?</h3><p>Data ini akan dikeluarkan dari daftar penghuni admin. Aksi ini juga menandai status pendaftaran sebagai dibatalkan di server.</p></div><div class="resident-delete-modal__actions"><button class="resident-detail-btn" type="button" id="cancelResidentDelete">Batal</button><button class="resident-delete-btn" type="button" id="confirmResidentDelete"><i class="fa-solid fa-trash" aria-hidden="true"></i><span>Hapus</span></button></div></div></div>`;
+}
+
+function renderAdminChatPanel() {
+  return `<section class="admin-page-panel" id="chat" data-section><div class="panel-head"><div><span>Grup Chat</span><h3>Pantau percakapan penghuni</h3></div></div><div class="group-chat-box"><div class="group-chat-messages" id="adminChatMessages"><p class="chat-placeholder">Memuat percakapan...</p></div><form class="group-chat-form" id="adminChatForm"><input name="message" type="text" placeholder="Ketik sebagai admin..." autocomplete="off" maxlength="2000" required /><button class="button primary" type="submit">Kirim</button></form></div></section>`;
 }
 
 function renderPaymentsAdminPanel() {
@@ -1881,7 +2026,7 @@ function renderPaymentsAdminPanel() {
   const { resident, proof, proofs, qrisParts, splitParts, rent, deposit, total } = getAdminApplicationState(selectedBuyer);
   if (!resident?.name) return `<section class="payment-review-page admin-page-panel" id="pembayaran" data-section><div class="empty admin-empty-state"><strong>Belum ada pembayaran.</strong><p>Data muncul setelah calon penghuni daftar dan memilih metode administrasi.</p></div></section>`;
 
-  const rows = proofs.filter((item) => item?.status);
+  const rows = proofs.filter((item) => item?.status && String(item.application_id || '') === String(selectedBuyer.id || resident.id || ''));
   const qrisOpenedTotal = qrisParts.reduce((sum, index) => sum + Number(splitParts[index] || 0), 0);
   const remainingTotal = Math.max(0, total - qrisOpenedTotal);
   const proofStatus = proof?.status || 'none';
@@ -1900,22 +2045,26 @@ function renderPaymentsAdminPanel() {
      ['proof', 'Bukti Masuk'],
    ];
    const dueDate = getResidentLeaseDueDate(resident, calculateLeaseEnd(resident.startDate || new Date().toISOString().slice(0, 10), resident.leaseType || 'Bulanan', resident.duration || 1));
-   const paymentNav = `<nav class="payment-subnav no-print">${navItems.map(([id, label]) => `<button class="${section === id ? 'is-active' : ''}" type="button" data-payment-section="${id}">${label}</button>`).join('')}</nav>`;
+   const paymentIcons = { overview: 'fa-chart-pie', method: 'fa-wallet', proof: 'fa-receipt' };
+   const paymentNav = `<nav class="payment-subnav payment-detail-tabs no-print">${navItems.map(([id, label]) => `<button class="${section === id ? 'is-active' : ''}" type="button" data-payment-section="${id}"><i class="fa-solid ${paymentIcons[id] || 'fa-circle'}" aria-hidden="true"></i><span>${label}</span></button>`).join('')}</nav>`;
   const proofRows = rows.length ? rows.map((item) => {
-    const proofUrl = item.fileUrl || item.file_url || item.proofUrl || '';
+    const rawUrl = item.fileUrl || item.file_url || item.proofUrl || '';
+    const proofUrl = rawUrl
+      ? (rawUrl.startsWith('http') ? rawUrl : rawUrl.startsWith('../') ? rawUrl.replace(/^\.\.\//, '/be/') : rawUrl.startsWith('/') ? rawUrl : '/be/' + rawUrl)
+      : '';
     const proofFile = item.fileName || item.file_name || 'Tanpa file';
     const proofStatusText = String(item.status || '').toLowerCase();
     const canReviewProof = /uploaded|review|menunggu|pending/.test(proofStatusText) && !/approved|recorded|paid|sudah|selesai|reject|ditolak/.test(proofStatusText);
-    const proofActions = canReviewProof ? `<div class="admin-payment-actions no-print"><span class="admin-payment-actions__hint">Approve = setujui penghuni</span><button class="row-print-btn row-print-btn--gold" type="button" data-approve-payment="${escapeHtml(item.id || '')}">Approve</button><button class="row-print-btn" type="button" data-reject-payment="${escapeHtml(item.id || '')}">Tolak</button></div>` : '<div class="admin-payment-actions admin-payment-actions--locked no-print"><span>Selesai</span></div>';
-    return `<article class="payment-proof-row"><div><span>${escapeHtml(item.invoice || 'MANUAL')}</span><strong>${escapeHtml(item.residentName || resident.name || '-')}</strong><small>${escapeHtml(item.room || resident.room || '-')} · ${escapeHtml(item.uploadedAt || item.created_at || '-')}</small>${proofUrl ? `<button class="proof-preview-link proof-preview-button" type="button" data-proof-preview-url="${escapeHtml(proofUrl)}" data-proof-preview-file="${escapeHtml(proofFile)}"><i class="fa-regular fa-image" aria-hidden="true"></i>Lihat Bukti</button>` : `<em class="proof-preview-empty">${escapeHtml(proofFile)}</em>`}</div><b>${rupiah(Number(item.amount || total || 0))}</b><i class="status-${slug(item.status)}">${escapeHtml(item.status)}</i>${proofActions}</article>`;
+    const proofActions = canReviewProof ? `<div class="admin-payment-actions"><span class="admin-payment-actions__hint">Approve = setujui penghuni</span><button class="row-print-btn row-print-btn--gold" type="button" data-approve-payment="${escapeHtml(item.id || '')}">Approve</button><button class="row-print-btn" type="button" data-reject-payment="${escapeHtml(item.id || '')}">Tolak</button></div>` : `<div class="admin-payment-actions admin-payment-actions--locked"><span class="status-${slug(item.status || '')}">${escapeHtml(item.status || 'Selesai')}</span></div>`;
+    return `<article class="payment-proof-row"><div class="payment-proof-row__info"><div class="payment-proof-row__detail"><span>${escapeHtml(item.invoice || 'MANUAL')}</span><strong>${escapeHtml(item.residentName || resident.name || '-')}</strong><small>${escapeHtml(item.room || resident.room || '-')} · ${escapeHtml(item.uploadedAt || item.created_at || '-')}</small></div>${proofUrl ? `<button class="proof-preview-button" type="button" data-proof-preview-url="${escapeHtml(proofUrl)}" data-proof-preview-file="${escapeHtml(proofFile)}"><i class="fa-regular fa-image" aria-hidden="true"></i><span>Lihat Bukti</span></button>` : `<em class="proof-preview-empty">${escapeHtml(proofFile)}</em>`}</div><b>${rupiah(Number(item.amount || total || 0))}</b>${proofActions}</article>`;
   }).join('') : '<div class="payment-empty-row"><strong>Belum ada bukti transfer.</strong><p>Queue ini khusus review bukti manual yang diupload penghuni.</p></div>';
 
-  const overviewPage = `<section class="payment-review-status"><article><span>Status</span><strong>${escapeHtml(paymentStage)}</strong><small>${proofStatus !== 'none' ? `Bukti: ${escapeHtml(proofStatus)}` : 'Belum ada bukti transfer'}</small></article><article><span>Total Tagihan Awal</span><strong>${rupiah(total)}</strong><small>Sewa ${rupiah(rent)} + deposit ${rupiah(deposit)}</small></article><article><span>Sudah Dibuka via QRIS</span><strong>${rupiah(qrisOpenedTotal)}</strong><small>${qrisParts.length}/${splitParts.length} link dibuat</small></article><article><span>Sisa Belum Dibuka</span><strong>${rupiah(remainingTotal)}</strong><small>Bisa QRIS berikutnya atau transfer</small></article></section><section class="payment-overview-grid"><article><span>Calon Penghuni</span><strong>${escapeHtml(resident.name)}</strong><small>${escapeHtml(resident.room || '-')} · ${escapeHtml(resident.phone || '-')}</small></article><article><span>Rekening Refund</span><strong>${escapeHtml(resident.refundBank || '-')} ${escapeHtml(resident.refundAccount || '-')}</strong><small>${escapeHtml(resident.refundAccountName || '-')}</small></article><article><span>Keputusan Admin</span><strong>${escapeHtml(resident.administrationStatus || resident.applicationStatus || 'Menunggu')}</strong><small>Berubah setelah bukti disetujui/ditolak</small></article><article><span>Jatuh Tempo</span><strong>${formatInvoiceDate(dueDate)}</strong><small>Peraturan: ${escapeHtml(resident.leaseType || 'Bulanan')} · durasi ${resident.duration || 1}</small></article></section>`;
-  const methodPage = `<section class="payment-method-grid payment-method-grid--admin"><article class="payment-tool-page"><div class="payment-tool-head"><div><span>Metode 1</span><h4>QRIS otomatis</h4><p>Bayar via link QRIS, otomatis dipecah sesuai limit.</p></div><strong>${rupiah(qrisOpenedTotal)} / ${rupiah(total)}</strong></div><div class="payment-split-list payment-split-list--page">${splitParts.map((part, index) => `<button type="button" class="payment-split-chip ${qrisParts.includes(index) ? 'is-opened' : ''}" data-qris-part="${index}" data-qris-amount="${part}"><span>QRIS ${index + 1}</span><strong>${rupiah(part)}</strong><small>${qrisParts.includes(index) ? 'Link sudah dibuat' : 'Buat link bayar'}</small></button>`).join('') || '<p class="payment-empty-row">Tidak ada tagihan untuk dibuatkan QRIS.</p>'}</div></article><article class="payment-tool-page"><div class="payment-tool-head"><div><span>Metode 2</span><h4>Transfer manual</h4><p>Transfer bank, penghuni upload bukti dari portal.</p></div><strong>${rupiah(total)}</strong></div><div class="manual-transfer-box manual-transfer-box--page"><p><span>Bank</span><strong>${manualTransferAccount.bank}</strong></p><p><span>Rekening</span><strong>${manualTransferAccount.number}</strong></p><p><span>Atas nama</span><strong>${manualTransferAccount.holder}</strong></p><p><span>Nominal</span><strong>${rupiah(total)}</strong></p><a class="row-print-btn row-print-btn--gold" href="https://wa.me/${manualTransferAccount.whatsapp}?text=${encodeURIComponent(`Halo Admin Onyx, mohon review pembayaran administrasi ${resident.name || ''} sebesar ${rupiah(total)}.`)}" target="_blank" rel="noopener noreferrer">Kirim Instruksi WA</a></div></article></section>`;
-  const proofPage = `<section class="payment-proof-panel"><div class="payment-proof-panel__head"><div><span>Bukti Masuk</span><h4>Review pembayaran transfer</h4><p><strong>Approve = aktifkan penghuni</strong>, tolak jika tidak sesuai.</p></div><small>${rows.length} bukti</small></div><div class="payment-proof-list">${proofRows}</div></section>${renderProofPreviewModal()}`;
+  const overviewPage = `<section class="payment-detail-stack"><div class="payment-detail-metrics"><article><span>Status</span><strong>${escapeHtml(paymentStage)}</strong><small>${proofStatus !== 'none' ? `Bukti: ${escapeHtml(proofStatus)}` : 'Belum ada bukti transfer'}</small></article><article><span>Total tagihan</span><strong>${rupiah(total)}</strong><small>Sewa ${rupiah(rent)} + deposit ${rupiah(deposit)}</small></article><article><span>QRIS dibuat</span><strong>${rupiah(qrisOpenedTotal)}</strong><small>${qrisParts.length}/${splitParts.length} link aktif</small></article><article><span>Sisa bayar</span><strong>${rupiah(remainingTotal)}</strong><small>QRIS berikutnya / transfer manual</small></article></div><div class="payment-detail-section"><header><span>Informasi administrasi</span><h4>Ringkasan buyer</h4></header><div class="payment-detail-info-grid"><p><span>Nama</span><strong>${escapeHtml(resident.name)}</strong></p><p><span>Kamar</span><strong>${escapeHtml(resident.room || '-')}</strong></p><p><span>Kontak</span><strong>${escapeHtml(resident.phone || resident.email || '-')}</strong></p><p><span>Status admin</span><strong>${escapeHtml(resident.administrationStatus || resident.applicationStatus || 'Menunggu')}</strong></p><p><span>Refund</span><strong>${escapeHtml(resident.refundBank || '-')} ${escapeHtml(resident.refundAccount || '-')}</strong><small>${escapeHtml(resident.refundAccountName || '-')}</small></p><p><span>Jatuh tempo</span><strong>${formatInvoiceDate(dueDate)}</strong><small>${escapeHtml(resident.leaseType || 'Bulanan')} · durasi ${resident.duration || 1}</small></p></div></div></section>`;
+  const methodPage = `<section class="payment-detail-stack"><div class="payment-method-grid payment-method-grid--admin"><article class="payment-tool-page"><div class="payment-tool-head"><div><span>Metode 1</span><h4>QRIS otomatis</h4><p>Pecah pembayaran sesuai limit, lalu kirim link ke penghuni.</p></div><strong>${rupiah(qrisOpenedTotal)} / ${rupiah(total)}</strong></div><div class="payment-split-list payment-split-list--page">${splitParts.map((part, index) => `<button type="button" class="payment-split-chip ${qrisParts.includes(index) ? 'is-opened' : ''}" data-qris-part="${index}" data-qris-amount="${part}"><span>QRIS ${index + 1}</span><strong>${rupiah(part)}</strong><small>${qrisParts.includes(index) ? 'Link sudah dibuat' : 'Buat link bayar'}</small></button>`).join('') || '<p class="payment-empty-row">Tidak ada tagihan untuk dibuatkan QRIS.</p>'}</div></article><article class="payment-tool-page"><div class="payment-tool-head"><div><span>Metode 2</span><h4>Transfer manual</h4><p>Instruksi rekening tetap; penghuni upload bukti dari portal.</p></div><strong>${rupiah(total)}</strong></div><div class="manual-transfer-box manual-transfer-box--page"><p><span>Bank</span><strong>${manualTransferAccount.bank}</strong></p><p><span>Rekening</span><strong>${manualTransferAccount.number}</strong></p><p><span>Atas nama</span><strong>${manualTransferAccount.holder}</strong></p><p><span>Nominal</span><strong>${rupiah(total)}</strong></p><a class="row-print-btn row-print-btn--gold" href="https://wa.me/${manualTransferAccount.whatsapp}?text=${encodeURIComponent(`Halo Admin Onyx, mohon review pembayaran administrasi ${resident.name || ''} sebesar ${rupiah(total)}.`)}" target="_blank" rel="noopener noreferrer">Kirim Instruksi WA</a></div></article></div></section>`;
+  const proofPage = `<section class="payment-proof-panel payment-detail-section"><div class="payment-proof-panel__head"><div><span>Bukti Masuk</span><h4>Review pembayaran transfer</h4><p><strong>Approve = aktifkan penghuni</strong>. Tolak hanya kalau nominal/file tidak sesuai.</p></div><small>${rows.length} bukti</small></div><div class="payment-proof-list">${proofRows}</div></section>${renderProofPreviewModal()}`;
   const pages = { overview: overviewPage, method: methodPage, proof: proofPage };
 
-  return `<section class="payment-review-page" id="pembayaran" data-section><div class="payment-review-hero"><div><span>Payment Detail</span><h3>${escapeHtml(resident.name)} · ${escapeHtml(navItems.find(([id]) => id === section)?.[1] || 'Ringkasan')}</h3><p>${escapeHtml(resident.room || '-')} · ${escapeHtml(paymentStage)}</p></div><div class="payment-review-hero__actions no-print"><button class="button subtle" type="button" id="backToPaymentList"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>List buyer</button><button class="button subtle" type="button" id="refreshPayments"><i class="fa-solid fa-rotate" aria-hidden="true"></i>Refresh</button></div></div>${paymentNav}${pages[section] || overviewPage}</section>`;
+  return `<section class="payment-review-page payment-detail-page" id="pembayaran" data-section><div class="payment-review-hero payment-detail-hero"><div><span>Payment Detail</span><h3>${escapeHtml(resident.name)}</h3><p>${escapeHtml(resident.room || '-')} · ${escapeHtml(paymentStage)}</p></div><div class="payment-review-hero__actions no-print"><button class="button subtle" type="button" id="backToPaymentList"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>List buyer</button><button class="button subtle" type="button" id="refreshPayments"><i class="fa-solid fa-rotate" aria-hidden="true"></i>Refresh</button></div></div><div class="payment-detail-shell"><aside class="payment-detail-sidebar"><div class="payment-detail-avatar">${escapeHtml((resident.name || 'P').slice(0, 1).toUpperCase())}</div><strong>${escapeHtml(resident.name || '-')}</strong><span>${escapeHtml(resident.room || '-')}</span><p>${escapeHtml(resident.phone || resident.email || '-')}</p><div class="payment-detail-side-card"><small>Total</small><b>${rupiah(total)}</b><em>${escapeHtml(paymentStage)}</em></div>${paymentNav}</aside><main class="payment-detail-content">${pages[section] || overviewPage}</main></div></section>`;
 }
 
 function renderProofPreviewModal() {
@@ -1932,8 +2081,22 @@ function renderProofPreviewModal() {
 function renderAdminPersonDetail(type, person) {
   if (!person) return '<section class="panel section-panel admin-page-panel"><div class="empty admin-empty-state"><strong>Belum ada data real.</strong><p>Silakan tunggu pendaftaran dari frontend.</p></div></section>';
   const isResident = (person.category || 'Long Stay') === 'Long Stay';
-  const adminExtras = person.refund || person.administrationStatus ? `<div class="admin-detail-extra"><article><span>Administrasi</span><strong>${escapeHtml(person.administrationStatus || '-')}</strong></article><article><span>Rekening Refund Deposit</span><strong>${escapeHtml(person.refund || '-')}</strong></article></div>` : '';
-  return `<section class="panel section-panel admin-page-panel admin-detail-page"><div class="panel-head wrap"><div><span>${isResident ? 'Detail Penghuni' : 'Detail Penyewa'}</span><h3>${escapeHtml(person.name)}</h3></div><button class="button subtle" type="button" id="backToAdminList"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>Kembali</button></div><div class="admin-detail-summary"><article><span>Kamar</span><strong>${escapeHtml(person.room)}</strong></article><article><span>Tipe</span><strong>${escapeHtml(person.plan)}</strong></article><article><span>Status</span><strong>${escapeHtml(person.status)}</strong></article></div><form class="admin-detail-form" id="adminDetailForm"><label>Nama<input name="name" value="${escapeHtml(person.name)}" /></label><label>Kamar<input name="room" value="${escapeHtml(person.room)}" /></label><label>${isResident ? 'Masa Huni' : 'Masa Sewa'}<select name="plan"><option ${person.plan === 'Bulanan' ? 'selected' : ''}>Bulanan</option><option ${person.plan === 'Tahunan' ? 'selected' : ''}>Tahunan</option><option ${person.plan === 'Harian' ? 'selected' : ''}>Harian</option><option ${person.plan === 'Mingguan' ? 'selected' : ''}>Mingguan</option></select></label><label>Mulai<input type="date" name="start" value="${escapeHtml(person.start || '')}" /></label><label>Selesai<input type="date" name="end" value="${escapeHtml(person.end || '')}" /></label><label>${isResident ? 'Tagihan' : 'Total Sewa'}<input name="amount" value="${escapeHtml(isResident ? person.billing : person.total)}" /></label><label>Jatuh Tempo<input name="due" value="${escapeHtml(person.due || '')}" /></label><label>Status<select name="status"><option ${person.status === 'Aktif' ? 'selected' : ''}>Aktif</option><option ${person.status === 'Pending' ? 'selected' : ''}>Pending</option><option ${person.status === 'Confirmed' ? 'selected' : ''}>Confirmed</option><option ${person.status === 'Check-in' ? 'selected' : ''}>Check-in</option><option ${person.status === 'Maintenance hold' ? 'selected' : ''}>Maintenance hold</option><option>Selesai</option></select></label><label class="full">Catatan<textarea name="notes" placeholder="Catatan admin, deposit, perubahan invoice, atau follow-up pembayaran."></textarea></label><div class="form-actions full"><button class="button primary" type="submit">Simpan Perubahan</button><button class="button subtle" type="button" id="backToAdminListSecondary">Batal</button></div></form></section>`;
+  const raw = person.raw || {};
+  const phone = raw.phone || '-';
+  const email = raw.email || '-';
+  const nik = raw.nik || '-';
+  const address = raw.address || '-';
+  const occupation = raw.occupation || '-';
+  const deposit = raw.deposit ? rupiah(Number(raw.deposit)) : '-';
+  const budget = raw.monthlyBudget ? rupiah(Number(raw.monthlyBudget)) : '-';
+  const emergency = raw.emergencyContact || raw.emergency_contact || '-';
+  const refund = raw.refundBank
+    ? `${raw.refundBank || ''} ${raw.refundAccount || ''} · a.n ${raw.refundAccountName || ''}`
+    : '-';
+  const leaseType = raw.leaseType || raw.lease_type || '';
+  const title = isResident ? 'Detail Penghuni' : 'Detail Penyewa';
+
+  return `<section class="panel section-panel admin-page-panel admin-detail-page admin-detail-print-scope"><div class="panel-head wrap"><div><span>${title}</span><h3>${escapeHtml(person.name)}</h3></div><div class="admin-detail-actions no-print"><button class="button subtle" type="button" id="printResidentDetail"><i class="fa-solid fa-print" aria-hidden="true"></i>Cetak Identitas</button><button class="button subtle" type="button" id="backToAdminList"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i>Kembali</button></div></div><section class="resident-identity-print"><header><span>Onyx Residence</span><h2>Detail Identitas ${escapeHtml(person.name)}</h2><p>Dokumen ringkas identitas penghuni/penyewa untuk arsip administrasi.</p></header></section><div class="admin-detail-grid"><div class="admin-detail-card"><span>Identitas</span><article><p><span>NIK</span><strong>${escapeHtml(nik)}</strong></p><p><span>Telepon</span><strong>${escapeHtml(phone)}</strong></p><p><span>Email</span><strong>${escapeHtml(email)}</strong></p><p><span>Pekerjaan</span><strong>${escapeHtml(occupation)}</strong></p><p><span>Alamat</span><strong>${escapeHtml(address)}</strong></p></article></div><div class="admin-detail-card"><span>Kontrak</span><article><p><span>Kamar</span><strong>${escapeHtml(person.room)}</strong></p><p><span>Tipe Sewa</span><strong>${escapeHtml(person.plan)}</strong></p><p><span>Durasi</span><strong>${escapeHtml(raw.duration || '-')} ${escapeHtml(leaseType)}</strong></p><p><span>Mulai</span><strong>${escapeHtml(raw.startDate || raw.start_date || '-')}</strong></p><p><span>Selesai</span><strong>${escapeHtml(raw.endDate || raw.end_date || '-')}</strong></p></article></div><div class="admin-detail-card"><span>Keuangan</span><article><p><span>Sewa/Bulan</span><strong>${escapeHtml(budget)}</strong></p><p><span>Deposit</span><strong>${escapeHtml(deposit)}</strong></p><p><span>Kontak Darurat</span><strong>${escapeHtml(emergency)}</strong></p><p><span>Refund</span><strong>${escapeHtml(refund)}</strong></p></article></div><div class="admin-detail-card"><span>Status</span><article><p><span>Status</span><strong class="status-${slug(person.status)}">${escapeHtml(person.status)}</strong></p><p><span>Administrasi</span><strong>${escapeHtml(person.administration || raw.administrationStatus || '-')}</strong></p><p><span>Tagihan</span><strong>${escapeHtml(person.billing || person.total || '-')}</strong></p><p><span>Jatuh Tempo</span><strong>${escapeHtml(person.nextDue || person.due || '-')}</strong></p></article></div></div></section>`;
 }
 
 function renderReservationsPanel() {
@@ -1978,7 +2141,7 @@ function renderCashflowPanel() {
   const outstanding = totalRevenue - paidRevenue;
   const totalDeposit = buyers.reduce((sum, item) => sum + Number(item.deposit || 0), 0);
   const utilityCost = utilityMeters.reduce((sum, item) => sum + Number(item.totalAmount || 0), 0);
-  const netCashflow = paidRevenue - utilityCost;
+  const netCashflow = paidRevenue;
   const collectionRate = totalRevenue ? Math.round((paidRevenue / totalRevenue) * 100) : 0;
   const reviewAmount = reviewBuyers.reduce((sum, item) => sum + Number(item.totalPayment || 0), 0);
   const rejectedAmount = rejectedBuyers.reduce((sum, item) => sum + Number(item.totalPayment || 0), 0);
@@ -2027,7 +2190,7 @@ function renderCashflowPanel() {
     { label: 'Pemasukan', value: paidRevenue, color: '#8ff0bd' },
     { label: 'Outstanding', value: outstanding, color: '#ffcf66' },
     { label: 'Deposit', value: totalDeposit, color: '#60a5fa' },
-    { label: 'Biaya Utilitas', value: utilityCost, color: '#ff9d9d' },
+    { label: 'Tagihan Utilitas', value: utilityCost, color: '#ff9d9d' },
   ];
   const finMax = Math.max(...finBars.map((b) => b.value), 1);
   const finBarHtml = finBars.map((bar) => {
@@ -2037,7 +2200,7 @@ function renderCashflowPanel() {
 
   return `<section class="admin-page-panel cashflow-page" id="laporan" data-section>
     <div class="cf-hero">
-      <div class="cf-hero__lead"><span class="cf-eyebrow">Laporan Keuangan</span><h3>${periodLabel}</h3><p>Uang masuk, piutang, deposit, biaya utilitas, dan transaksi penghuni.</p></div>
+      <div class="cf-hero__lead"><span class="cf-eyebrow">Laporan Keuangan</span><h3>${periodLabel}</h3><p>Uang masuk, piutang, deposit, tagihan utilitas tercatat, dan transaksi penghuni.</p></div>
       <div class="cf-hero__total"><span class="cf-hero__label">Total Nilai Transaksi</span><strong class="cf-hero__value">${rupiah(totalRevenue)}</strong><div class="cf-hero__meta"><small>${buyers.length} transaksi</small><button class="cf-print-btn no-print" type="button" id="printCashflow"><i class="fa-solid fa-print" aria-hidden="true"></i> Cetak Laporan</button></div></div>
     </div>
     <div class="cf-metrics">
@@ -2055,7 +2218,7 @@ function renderCashflowPanel() {
       </article>
       <article class="cf-metric cf-metric--cost">
         <div class="cf-metric__icon"><i class="fa-solid fa-bolt" aria-hidden="true"></i></div>
-        <div class="cf-metric__body"><span>Biaya Utilitas</span><strong>${rupiah(utilityCost)}</strong><small>${utilityMeters.length} meter tercatat</small></div>
+        <div class="cf-metric__body"><span>Tagihan Utilitas</span><strong>${rupiah(utilityCost)}</strong><small>${utilityMeters.length} meter tercatat · tidak mengurangi omset</small></div>
       </article>
     </div>
     <div class="cf-main">
@@ -2075,8 +2238,8 @@ function renderCashflowPanel() {
             <div><dt>Pemasukan</dt><dd class="cf-summary__paid">${rupiah(paidRevenue)}</dd></div>
             <div><dt>Belum Tertagih</dt><dd>${rupiah(outstanding)}</dd></div>
             <div><dt>Deposit Terkumpul</dt><dd>${rupiah(totalDeposit)}</dd></div>
-            <div><dt>Biaya Utilitas</dt><dd class="cf-summary__cost">− ${rupiah(utilityCost)}</dd></div>
-            <div class="cf-summary__total"><dt>Net Cashflow</dt><dd>${rupiah(netCashflow)}</dd></div>
+            <div><dt>Tagihan Utilitas Tercatat</dt><dd class="cf-summary__cost">${rupiah(utilityCost)}</dd></div>
+            <div class="cf-summary__total"><dt>Omset Masuk</dt><dd>${rupiah(netCashflow)}</dd></div>
           </dl>
         </article>
         <article class="cf-card cf-card--actions">
@@ -2106,7 +2269,7 @@ function renderCashflowPanel() {
       <article class="cf-card cf-card--bars">
         <header class="cf-card__head">
           <div><h4>Komposisi Keuangan</h4><p>Perbandingan arus kas utama</p></div>
-          <small>Net ${rupiah(netCashflow)}</small>
+          <small>Omset ${rupiah(netCashflow)}</small>
         </header>
         <div class="cf-bar-chart">${finBarHtml}</div>
       </article>
@@ -2125,7 +2288,7 @@ function renderCashflowPrintReport(data) {
     return `<tr><td>${escapeHtml(item.name || '-')}<small>${escapeHtml(item.room || '-')}</small></td><td>${rupiah(Number(item.totalPayment || 0))}</td><td>${escapeHtml(String(date))}</td><td>${status}</td></tr>`;
   }).join('');
   return `<section class="cashflow-print-report" aria-label="Laporan arus kas">
-    <header><div><span>Onyx Residence</span><h2>Laporan Arus Kas Bisnis</h2><p>Periode ${escapeHtml(periodLabel)} · pemasukan, piutang, dan biaya utilitas.</p></div><aside><b>${escapeHtml(generatedAt)}</b><small>Dicetak oleh Admin</small></aside></header>
+    <header><div><span>Onyx Residence</span><h2>Laporan Arus Kas Bisnis</h2><p>Periode ${escapeHtml(periodLabel)} · pemasukan, piutang, deposit, dan tagihan utilitas tercatat.</p></div><aside><b>${escapeHtml(generatedAt)}</b><small>Dicetak oleh Admin</small></aside></header>
     <div class="cashflow-print-summary">
       <article><span>Total Transaksi</span><strong>${rupiah(totalRevenue)}</strong></article>
       <article><span>Pemasukan</span><strong>${rupiah(paidRevenue)}</strong></article>
@@ -2135,10 +2298,10 @@ function renderCashflowPrintReport(data) {
     <table><thead><tr><th>Resident</th><th>Nominal</th><th>Tanggal</th><th>Status</th></tr></thead><tbody>${rows || '<tr><td colspan="4">Belum ada transaksi.</td></tr>'}</tbody></table>
     <dl class="cashflow-print-totals">
       <div><dt>Deposit terkumpul</dt><dd>${rupiah(totalDeposit)}</dd></div>
-      <div><dt>Biaya utilitas</dt><dd>− ${rupiah(utilityCost)}</dd></div>
-      <div class="cashflow-print-totals__net"><dt>Net Cashflow</dt><dd>${rupiah(netCashflow)}</dd></div>
+      <div><dt>Tagihan utilitas tercatat</dt><dd>${rupiah(utilityCost)}</dd></div>
+      <div class="cashflow-print-totals__net"><dt>Omset masuk</dt><dd>${rupiah(netCashflow)}</dd></div>
     </dl>
-    <footer><span>Catatan</span><p>Pemasukan dihitung dari pembayaran yang sudah disetujui admin. Net cashflow = pemasukan − biaya utilitas.</p></footer>
+    <footer><span>Catatan</span><p>Pemasukan dihitung dari pembayaran yang sudah disetujui admin. Tagihan utilitas ditampilkan sebagai data meter tercatat dan tidak otomatis mengurangi omset.</p></footer>
   </section>`;
 }
 
@@ -2204,6 +2367,21 @@ function bindEvents() {
       state.isRoomCreateOpen = false;
       renderApp();
     });
+  });
+
+  document.querySelector('#openUtilityMeterModal')?.addEventListener('click', () => {
+    state.isUtilityMeterModalOpen = true;
+    renderApp();
+  });
+
+  document.querySelector('#closeUtilityMeterModal')?.addEventListener('click', () => {
+    state.isUtilityMeterModalOpen = false;
+    renderApp();
+  });
+
+  document.querySelector('#cancelUtilityMeterModal')?.addEventListener('click', () => {
+    state.isUtilityMeterModalOpen = false;
+    renderApp();
   });
 
   document.querySelector('#adminToggleSmartLock')?.addEventListener('click', async () => {
@@ -2565,6 +2743,8 @@ function bindEvents() {
     renderApp();
   });
 
+  document.querySelector('#printResidentDetail')?.addEventListener('click', () => window.print());
+
   // Event subnav Detail Kamar: memisahkan Overview, Smart Control, dan Meter & Tagihan.
   document.querySelectorAll('[data-room-detail-section]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -2634,6 +2814,49 @@ function bindEvents() {
   });
 
   // Event detail penghuni/penyewa: membuka halaman detail orang dari list admin.
+  document.querySelectorAll('[data-resident-delete]').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.residentDeleteTarget = {
+        id: button.dataset.residentDelete || '',
+        name: button.dataset.residentName || 'penghuni',
+        index: Number(button.dataset.residentIndex || -1),
+      };
+      renderApp();
+    });
+  });
+
+  document.querySelector('#cancelResidentDelete')?.addEventListener('click', () => {
+    state.residentDeleteTarget = null;
+    renderApp();
+  });
+
+  document.querySelector('#confirmResidentDelete')?.addEventListener('click', async () => {
+    const target = state.residentDeleteTarget;
+    if (!target) return;
+    const id = target.id || '';
+    const name = target.name || 'penghuni';
+    if (id) {
+      try {
+        await apiJson('resident-application.php', { method: 'PATCH', body: JSON.stringify({ id, applicationStatus: 'Dibatalkan', status: 'dibatalkan' }) });
+      } catch (error) {
+        showToast(`Gagal hapus ${name}: ${error.message || 'server error'}`);
+        return;
+      }
+    }
+    const backendState = JSON.parse(window.localStorage.getItem('onyx-admin-state') || 'null') || {};
+    const sourceApplications = backendState.applications || backendState.data?.applications || [];
+    const nextApplications = sourceApplications.filter((item, index) => {
+      if (id) return String(item.id || '') !== String(id);
+      return index !== target.index;
+    });
+    const nextState = backendState.data ? { ...backendState, data: { ...backendState.data, applications: nextApplications } } : { ...backendState, applications: nextApplications };
+    window.localStorage.setItem('onyx-admin-state', JSON.stringify(nextState));
+    state.residentDeleteTarget = null;
+    showToast(`${name} dihapus dari daftar penghuni.`);
+    renderApp();
+  });
+
   document.querySelectorAll('[data-admin-detail]').forEach((button) => {
     button.addEventListener('click', () => {
       state.adminDetailType = button.dataset.adminDetail;
@@ -2676,11 +2899,11 @@ function bindEvents() {
     const { resident, proofs } = getAdminApplicationState();
     const proofId = button.dataset.proofId || button.dataset.approvePayment;
     const proof = proofs.find((item) => String(item.id || '') === String(proofId || '')) || JSON.parse(window.localStorage.getItem('onyx-payment-proof') || 'null');
-    if (proof) {
-      const updatedProof = { ...proof, status: 'approved', action: 'approve', application_id: proof.application_id || resident?.id, reviewedAt: new Date().toISOString() };
-      try { await apiJson('payment-proof.php', { method: 'POST', body: JSON.stringify(updatedProof) }); } catch (error) { showToast('Backend proof belum tersambung, approve disimpan lokal.'); }
-      window.localStorage.setItem('onyx-payment-proof', JSON.stringify(updatedProof));
-    }
+    if (!proof) { showToast('Bukti tidak ditemukan.'); return; }
+    if (proof.status === 'approved') { showToast('Bukti sudah disetujui sebelumnya.'); return; }
+    const updatedProof = { ...proof, status: 'approved', action: 'approve', application_id: proof.application_id || resident?.id, reviewedAt: new Date().toISOString() };
+    try { await apiJson('payment-proof.php', { method: 'POST', body: JSON.stringify(updatedProof) }); } catch (error) { showToast('Backend proof belum tersambung, approve disimpan lokal.'); }
+    window.localStorage.setItem('onyx-payment-proof', JSON.stringify(updatedProof));
     if (resident) window.localStorage.setItem('onyx-resident-account', JSON.stringify({ ...resident, administrationStatus: 'Dikonfirmasi Admin', applicationStatus: 'Approved' }));
     await syncAdminState(false);
     showToast('Bukti transfer disetujui. Status administrasi diperbarui.');
@@ -2692,11 +2915,11 @@ function bindEvents() {
     const { resident, proofs } = getAdminApplicationState();
     const proofId = button.dataset.proofId || button.dataset.rejectPayment;
     const proof = proofs.find((item) => String(item.id || '') === String(proofId || '')) || JSON.parse(window.localStorage.getItem('onyx-payment-proof') || 'null');
-    if (proof) {
-      const updatedProof = { ...proof, status: 'rejected', action: 'reject', application_id: proof.application_id || resident?.id, reviewedAt: new Date().toISOString() };
-      try { await apiJson('payment-proof.php', { method: 'POST', body: JSON.stringify(updatedProof) }); } catch (error) { showToast('Backend proof belum tersambung, reject disimpan lokal.'); }
-      window.localStorage.setItem('onyx-payment-proof', JSON.stringify(updatedProof));
-    }
+    if (!proof) { showToast('Bukti tidak ditemukan.'); return; }
+    if (proof.status === 'approved') { showToast('Bukti sudah disetujui, tidak bisa ditolak.'); return; }
+    const updatedProof = { ...proof, status: 'rejected', action: 'reject', application_id: proof.application_id || resident?.id, reviewedAt: new Date().toISOString() };
+    try { await apiJson('payment-proof.php', { method: 'POST', body: JSON.stringify(updatedProof) }); } catch (error) { showToast('Backend proof belum tersambung, reject disimpan lokal.'); }
+    window.localStorage.setItem('onyx-payment-proof', JSON.stringify(updatedProof));
     await syncAdminState(false);
     showToast('Bukti transfer ditolak. Penghuni perlu upload ulang.');
     renderApp();
@@ -2792,6 +3015,29 @@ function bindEvents() {
     await syncAdminState(true);
     showToast('Bukti transfer disimpan. Menunggu konfirmasi admin.');
     renderApp();
+  });
+
+  // Event renewal intent: lanjut/tidak lanjut ngekost.
+  document.querySelectorAll('[data-renewal-continue]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.residentRenewalIntent = 'continue';
+      window.localStorage.setItem('onyx-renewal-intent', JSON.stringify('continue'));
+      renderApp();
+    });
+  });
+  document.querySelectorAll('[data-renewal-stop]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.residentRenewalIntent = 'stop';
+      window.localStorage.setItem('onyx-renewal-intent', JSON.stringify('stop'));
+      renderApp();
+    });
+  });
+  document.querySelectorAll('[data-renewal-reset]').forEach((button) => {
+    button.addEventListener('click', () => {
+      state.residentRenewalIntent = null;
+      window.localStorage.removeItem('onyx-renewal-intent');
+      renderApp();
+    });
   });
 
   // Event menu resident: memisahkan overview, billing, access, utility, dan service.
@@ -3092,6 +3338,94 @@ function bindEvents() {
     renderApp();
   });
 
+  // Chat grup: load & send
+  const chatBox = document.querySelector('#groupChatMessages');
+  const chatForm = document.querySelector('#groupChatForm');
+  let lastChatId = 0;
+  let chatPolling = null;
+
+  async function loadChat(before = 0) {
+    if (!chatBox) return;
+    try {
+      const params = before > 0 ? `?before=${before}` : '';
+      const res = await fetch(apiUrl('chat.php' + params), { credentials: 'include' });
+      const json = await res.json();
+      if (!json.success) return;
+      const msgs = json.data || [];
+      if (msgs.length) {
+        lastChatId = msgs[msgs.length - 1].id;
+        const html = msgs.map((m) => `<div class="chat-bubble chat-bubble--${m.sender_role}"><span>${escapeHtml(m.sender_name)}</span><p>${escapeHtml(m.message)}</p><small>${new Date(m.timestamp * 1000).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit'})}</small></div>`).join('');
+        chatBox.innerHTML = html;
+        chatBox.scrollTop = chatBox.scrollHeight;
+      }
+    } catch (e) {}
+  }
+
+  async function sendChat(message) {
+    try {
+      const resident = JSON.parse(window.localStorage.getItem('onyx-resident-account') || '{}');
+      await apiJson('chat.php', { method: 'POST', body: JSON.stringify({ message, senderName: resident.name || 'Penghuni', sender_id: resident.id || '' }), credentials: 'include' });
+    } catch (e) {}
+  }
+
+  chatForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = chatForm.querySelector('[name="message"]');
+    const msg = (input?.value || '').trim();
+    if (!msg) return;
+    input.value = '';
+    await sendChat(msg);
+    await loadChat();
+  });
+
+  if (chatBox) {
+    loadChat();
+    chatPolling = setInterval(() => loadChat(), 5000);
+  }
+
+  // --- Admin chat ---
+  const adminChatBox = document.querySelector('#adminChatMessages');
+  const adminChatForm = document.querySelector('#adminChatForm');
+  let adminLastChatId = 0;
+
+  async function loadAdminChat(before = 0) {
+    if (!adminChatBox) return;
+    try {
+      const params = before > 0 ? `?before=${before}&limit=100` : '?limit=100';
+      const res = await fetch(apiUrl('chat.php' + params), { credentials: 'include' });
+      const json = await res.json();
+      if (!json.success) return;
+      const msgs = json.data || [];
+      if (msgs.length) {
+        adminLastChatId = msgs[msgs.length - 1].id;
+        const html = msgs.map((m) => `<div class="chat-bubble chat-bubble--${m.sender_role}"><span>${escapeHtml(m.sender_name)}</span><p>${escapeHtml(m.message)}</p><small>${new Date(m.timestamp * 1000).toLocaleTimeString('id-ID', {hour:'2-digit',minute:'2-digit'})}</small></div>`).join('');
+        adminChatBox.innerHTML = html;
+        adminChatBox.scrollTop = adminChatBox.scrollHeight;
+      }
+    } catch (e) {}
+  }
+
+  async function sendAdminChat(message) {
+    try {
+      await apiJson('chat.php', { method: 'POST', body: JSON.stringify({ message, senderName: 'Admin' }), credentials: 'include' });
+    } catch (e) {}
+  }
+
+  adminChatForm?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = adminChatForm.querySelector('[name="message"]');
+    const msg = (input?.value || '').trim();
+    if (!msg) return;
+    input.value = '';
+    await sendAdminChat(msg);
+    await loadAdminChat();
+  });
+
+  if (adminChatBox) {
+    loadAdminChat();
+    setInterval(() => loadAdminChat(), 5000);
+  }
+
   // Event pencarian kamar: filter list kamar berdasarkan nomor atau nama kamar.
   document.querySelector('#adminRoomSearchProxy')?.addEventListener('input', (event) => {
     state.roomQuery = event.currentTarget.value;
@@ -3109,6 +3443,14 @@ function bindEvents() {
   document.querySelector('#statusFilter')?.addEventListener('change', (event) => {
     state.roomStatus = event.currentTarget.value;
     renderApp();
+  });
+
+  document.querySelector('#adminResidentSearch')?.addEventListener('input', (event) => {
+    state.residentQuery = event.currentTarget.value;
+    renderApp();
+    const input = document.querySelector('#adminResidentSearch');
+    input?.focus();
+    input?.setSelectionRange(state.residentQuery.length, state.residentQuery.length);
   });
 
   // Event CRUD kamar create/update: simpan data kamar ke backend kamar.php lalu fallback lokal jika backend mati.
@@ -3177,6 +3519,7 @@ function bindEvents() {
     try {
       await apiJson('utility-meter.php', { method: 'POST', body: JSON.stringify(payload) });
       await syncAdminState(true);
+      state.isUtilityMeterModalOpen = false;
       showToast('Meter listrik dan air tersimpan ke kamar.');
     } catch (error) {
       showToast('Gagal menyimpan meter utilitas ke backend.');

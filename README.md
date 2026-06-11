@@ -119,10 +119,6 @@ PPL_UAS/
 | Halaman | Tampilan |
 |---|---|---|
 | **Public Landing Page** | ![Public Page](./public-page-hero.png) |
-| **Admin Dashboard** | ![Admin Dashboard](./admin-redesign-dashboard.png) |
-| **Admin Layanan** | ![Admin Layanan](./admin-layanan-audit.png) |
-| **Layanan Penghuni** | ![Layanan Page](./layanan-page.png) |
-| **Form Kamar** | ![Room Create Form](./room-create-form.png) |
 
 ## Setup & Development
 
